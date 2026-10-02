@@ -589,11 +589,12 @@ func analyzeConnectivity(b *Bundle) ConnectivityReport {
 }
 
 func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
-	// Adopt lint's shared tag fold (canonTag: case + trim + single trailing 's'
-	// + separator-insensitive) so analyze and lint agree on when two spellings
-	// are one tag. Group by canonical key; within a key, keep the DISTINCT node
-	// set (a node tagged both `wine` and `Wine` counts once) and the raw variants
-	// so the reported tag is a real spelling, not the fold key.
+	// Adopt lint's tag fold (tagKeys) so analyze and lint agree on when two
+	// spellings are one tag. Group by canonical key; within a key, keep the
+	// DISTINCT node set (a node tagged both `wine` and `Wine` counts once) and the
+	// lower-cased variants, so the reported tag is a real spelling rather than the
+	// fold key, and a case-only cluster keeps the lower-cased label it always had.
+	tagKey := bundleTagKeys(b)
 	type cluster struct {
 		nodes    map[string]bool
 		variants map[string]bool
@@ -601,7 +602,7 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 	byKey := map[string]*cluster{}
 	for _, p := range sortedNodePaths(b) {
 		for _, tag := range nodeTags(b.Nodes[p]) {
-			key := canonTag(tag)
+			key := tagKey[strings.TrimSpace(tag)]
 			if key == "" {
 				continue
 			}
@@ -611,7 +612,7 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 				byKey[key] = c
 			}
 			c.nodes[p] = true
-			c.variants[strings.TrimSpace(tag)] = true
+			c.variants[strings.ToLower(strings.TrimSpace(tag))] = true
 		}
 	}
 	var out []ClusterFinding
@@ -630,8 +631,8 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 			members = append(members, p)
 		}
 		sort.Strings(members)
-		// Report the lexicographically-first raw variant as the cluster tag: a
-		// real spelling from the corpus, deterministic across runs.
+		// Report the lexicographically-first lower-cased variant as the cluster
+		// tag: a real spelling from the corpus, deterministic across runs.
 		variants := make([]string, 0, len(c.variants))
 		for v := range c.variants {
 			variants = append(variants, v)
@@ -639,6 +640,11 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 		sort.Strings(variants)
 		out = append(out, ClusterFinding{Tag: variants[0], Nodes: members})
 	}
+	// Order by the reported label, not the fold key: the key drops separators
+	// (e-reporting -> ereporting), and sorting on it would reorder clusters
+	// relative to a case-only fold even when no spelling was merged. Labels are
+	// unique across clusters, since each lower-cased variant has exactly one key.
+	sort.Slice(out, func(i, j int) bool { return out[i].Tag < out[j].Tag })
 	return out
 }
 

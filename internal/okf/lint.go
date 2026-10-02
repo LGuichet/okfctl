@@ -663,12 +663,14 @@ func lintTypeHygiene(b *Bundle) []LintFinding {
 // case-sensitively, so one tag spelled three ways is three disjoint result sets;
 // this surfaces that drift the same way type-hygiene does for `type`.
 //
-// The fold is the shared canonTag: the base fold (case, trim, single trailing
-// 's') plus tag-only separator-insensitivity (-, _, space). Anti-taxonomy stands
-// (PRD §7.4): it flags only spellings that fold to ONE value, never two genuinely
-// distinct values, and it is a warning class — never a validate rejection. The
-// message lists each variant with its per-node count, variants sorted.
+// The fold is tagKeys: case, trim, and separator-insensitive surface forms,
+// with KStem's guarded plural rules folding a spelling onto another only when
+// that other spelling is itself a tag in the bundle. The fold is a heuristic;
+// anti-taxonomy stands (PRD §7.4): it reports spellings that fold together and
+// never rejects a value, a warning class—never a validate rejection. The message
+// lists each variant with its per-node count, variants sorted.
 func lintTagHygiene(b *Bundle) []LintFinding {
+	keys := bundleTagKeys(b)
 	// canonical -> raw tag value -> set of node paths carrying it.
 	groups := map[string]map[string]map[string]bool{}
 	for _, n := range b.Nodes {
@@ -679,7 +681,7 @@ func lintTagHygiene(b *Bundle) []LintFinding {
 				continue
 			}
 			seen[raw] = true
-			c := canonTag(raw)
+			c := keys[raw]
 			if c == "" {
 				continue
 			}
@@ -730,12 +732,12 @@ func pluralNodes(n int) string {
 	return "nodes"
 }
 
-// canonFold is the shared base fold: case-insensitive, trimmed, and singular
-// (drop a single trailing 's'). It is the one place `type` and `tags`
-// near-duplicate grouping agree on, so the tool can never apply two different
-// folds to the same kind of §4.1 value. It is separator-SENSITIVE by design —
-// separator-insensitivity is a tag-only layer (see canonTag) and must not leak
-// into the type path.
+// canonFold is the type fold: case-insensitive, trimmed, and singular (drop a
+// single trailing 's'). It is separator-SENSITIVE by design. Tags fold
+// differently (see tagKeys): short slug-like tag values (aws, ops, news) are
+// exactly where an unguarded trailing-'s' rule merges distinct values, so the
+// tag path uses KStem's guarded plural rules instead. Both paths share the case
+// and trim steps.
 func canonFold(s string) string {
 	c := strings.ToLower(strings.TrimSpace(s))
 	if len(c) > 1 && strings.HasSuffix(c, "s") {
@@ -749,15 +751,3 @@ func canonFold(s string) string {
 // add tag's separator rule, so type-hygiene behavior is unchanged by the shared
 // extraction.
 func canonType(s string) string { return canonFold(s) }
-
-// tagSeparators are the intra-tag separators (§4.1 tags are free-form): a hyphen,
-// underscore, or space. Two tags that differ only in how a compound is joined
-// (home-lab vs homelab, run book vs runbook) are one value spelled two ways.
-var tagSeparators = strings.NewReplacer("-", "", "_", "", " ", "")
-
-// canonTag folds a `tags` value: the shared base fold, then separator-insensitive
-// (-, _, space collapsed). The base fold runs first so a trailing 's' is dropped
-// before separators are removed (design-patterns -> design-pattern ->
-// designpattern), matching design-pattern's fold. Tags get this extra layer;
-// types do not.
-func canonTag(s string) string { return tagSeparators.Replace(canonFold(s)) }

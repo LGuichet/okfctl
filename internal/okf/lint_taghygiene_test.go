@@ -15,6 +15,7 @@
 package okf
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -26,9 +27,10 @@ func lintDocTags(typ, title string, tags []string, body string) string {
 	return "---\ntype: " + typ + "\ntitle: " + title + "\ntags: " + tl + "\n---\n\n# " + title + "\n\n" + body + "\n"
 }
 
-// The fold table is the contract. canonFold is the shared base fold used by both
-// type-hygiene and tag-hygiene (case, trim, single trailing 's'). canonTag layers
-// separator-insensitivity (-, _, space) on top of canonFold, for TAGS ONLY.
+// The fold tables are the contract. canonFold is the type fold (case, trim,
+// single trailing 's'). Tags fold through tagSurface (case, trim, separators)
+// and tagKeys (KStem's guarded plural rules, validated against the bundle's own
+// tag vocabulary).
 func TestCanonFold_SharedBaseFold(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"Concept", "concept"},
@@ -49,38 +51,91 @@ func TestCanonFold_SharedBaseFold(t *testing.T) {
 	}
 }
 
-func TestCanonTag_SeparatorInsensitive(t *testing.T) {
+func TestTagSurface_SeparatorInsensitive(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"Wine", "wine"},
-		{"wine", "wine"},
-		{"runbook", "runbook"},
-		{"runbooks", "runbook"},   // trailing 's'
-		{"run-book", "runbook"},   // hyphen stripped
-		{"run_book", "runbook"},   // underscore stripped
-		{"Run Book", "runbook"},   // space stripped + case
-		{"Play Book", "playbook"}, // space stripped + case
-		{"playbook", "playbook"},
-		{"home-lab", "homelab"}, // separator-only collision
-		{"homelab", "homelab"},
-		{"design-patterns", "designpattern"}, // separator + trailing 's'
-		{"design-pattern", "designpattern"},
-		// The -is / -us / -ss class must NOT lose its trailing letters: only a
-		// single trailing 's' is dropped, and none of these have a bare one.
-		{"hormesis", "hormesi"}, // -is: 's' dropped once, still distinct from any sibling
-		{"hysteresis", "hysteresi"},
-		{"css", "cs"},
-		{"gpt-oss", "gptos"},
-		{"blast-radius", "blastradiu"},
-		{"freshness", "freshnes"},
+		{"  wine ", "wine"},
+		{"runbooks", "runbooks"}, // no suffix is touched at this layer
+		{"run-book", "runbook"},  // hyphen
+		{"run_book", "runbook"},  // underscore
+		{"Run Book", "runbook"},  // space + case
+		{"ci/cd", "cicd"},        // slash
+		{"node.js", "nodejs"},    // full stop between letters (UAX #29)
+		{"asp.net", "aspnet"},
+		{".net", ".net"}, // a leading full stop is kept: .net is not net
+		{"v1.2", "v1.2"}, // a full stop between digits is kept: v1.2 is not v12
+		{"c++", "c++"},
+		{"-", ""},
 	}
 	for _, c := range cases {
-		if got := canonTag(c.in); got != c.want {
-			t.Errorf("canonTag(%q) = %q, want %q", c.in, got, c.want)
+		if got := tagSurface(c.in); got != c.want {
+			t.Errorf("tagSurface(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-// canonTag must NOT change the type path. Types still fold with canonType
+// KStem's plural candidates, in order, with its guards: not letters-only, two
+// letters or fewer, invariant forms, and a plain 's' after <= 3 letters, a double
+// 's', or 'ous' produce no candidate.
+func TestTagPluralCandidates_KStemRules(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"policies", []string{"policie", "policy"}},
+		{"patches", []string{"patche", "patch"}},
+		{"processes", []string{"process"}}, // double 's' before "es": no "-e" candidate
+		{"caches", []string{"cache", "cach"}},
+		{"runbooks", []string{"runbook"}},
+		{"nodejs", []string{"nodej"}}, // only ever used if "nodej" is itself a tag
+		{"aws", nil},                  // plain 's' after <= 3 letters
+		{"ops", nil},
+		{"ios", nil},
+		{"js", nil},     // two letters
+		{"k8s", nil},    // not letters-only
+		{"news", nil},   // Porter2 invariant form
+		{"atlas", nil},  // Porter2 invariant form
+		{"class", nil},  // double 's'
+		{"famous", nil}, // 'ous'
+		{"wine", nil},   // no final 's'
+	}
+	for _, c := range cases {
+		if got := tagPluralCandidates(c.in); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("tagPluralCandidates(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// tagKeys folds only onto an attested spelling, groups by connected component,
+// and is independent of input order.
+func TestTagKeys_AttestedFold(t *testing.T) {
+	raws := []string{"policies", "policy", "caches", "cache", "nodejs", "node.js", "news", "new", "aws", "aw", "Wine", "wine", "lonely-plurals"}
+	keys := tagKeys(raws)
+	for _, p := range [][2]string{{"policies", "policy"}, {"caches", "cache"}, {"nodejs", "node.js"}, {"Wine", "wine"}} {
+		if keys[p[0]] != keys[p[1]] {
+			t.Errorf("%q and %q must share a key; got %q / %q", p[0], p[1], keys[p[0]], keys[p[1]])
+		}
+	}
+	for _, p := range [][2]string{{"news", "new"}, {"aws", "aw"}} {
+		if keys[p[0]] == keys[p[1]] {
+			t.Errorf("%q and %q must NOT share a key; both got %q", p[0], p[1], keys[p[0]])
+		}
+	}
+	// No attested singular: the plural keeps its own surface form.
+	if keys["lonely-plurals"] != "lonelyplurals" {
+		t.Errorf("unattested plural must not be stemmed; got %q", keys["lonely-plurals"])
+	}
+	// Order independence: reversed input, identical keys.
+	rev := make([]string, len(raws))
+	for i, r := range raws {
+		rev[len(raws)-1-i] = r
+	}
+	if got := tagKeys(rev); !reflect.DeepEqual(got, keys) {
+		t.Errorf("tagKeys must not depend on input order:\n%v\n%v", keys, got)
+	}
+}
+
+// The tag fold must NOT change the type path. Types still fold with canonType
 // (== canonFold), which is separator-SENSITIVE. Proven by table: a hyphenated
 // and an unhyphenated type do NOT collapse under the type fold.
 func TestCanonType_UnchangedBySeparatorRule(t *testing.T) {
@@ -103,6 +158,11 @@ func TestLint_TagHygiene_Positive(t *testing.T) {
 		{"plural", "runbook", "runbooks"},
 		{"separator-hyphen", "run-book", "runbook"},
 		{"separator-space", "Play Book", "playbook"},
+		{"plural-es", "patch", "patches"},
+		{"plural-sibilant-es", "process", "processes"},
+		{"plural-ies", "policy", "policies"},
+		{"separator-slash", "ci/cd", "cicd"},
+		{"separator-dot", "node.js", "nodejs"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -140,20 +200,9 @@ func TestLint_TagHygiene_MessageCountsAndSort(t *testing.T) {
 	if len(th) != 1 {
 		t.Fatalf("expected one folded tag-hygiene finding, got %+v", th)
 	}
-	msg := th[0].Message
-	// Variants sorted ascending: run-book, runbook, runbooks.
-	iRunBook := strings.Index(msg, "run-book")
-	iRunbook := strings.Index(msg, "runbook ") // trailing space or paren after
-	iRunbooks := strings.Index(msg, "runbooks")
-	if iRunBook < 0 || iRunbook < 0 || iRunbooks < 0 {
-		t.Fatalf("message must name all three variants: %q", msg)
-	}
-	if iRunBook >= iRunbook || iRunbook >= iRunbooks {
-		t.Fatalf("variants must be sorted (run-book, runbook, runbooks): %q", msg)
-	}
-	// Per-node counts present: each variant is on exactly one node.
-	if !strings.Contains(msg, "(1 node)") && !strings.Contains(msg, "1 node") {
-		t.Fatalf("message must carry per-node counts: %q", msg)
+	const want = "tag-hygiene: near-duplicate tag values likely refer to one tag: run-book (1 node), runbook (1 node), runbooks (1 node)"
+	if th[0].Message != want {
+		t.Fatalf("tag-hygiene message:\n got: %q\nwant: %q", th[0].Message, want)
 	}
 }
 
@@ -167,6 +216,18 @@ func TestLint_TagHygiene_Negative(t *testing.T) {
 		{"version-digit", "v1", "v2"},
 		{"oauth-digit", "oauth1", "oauth2"},
 		{"distinct-words", "oncall", "incident"},
+		{"leading-dot", ".net", "net"}, // a leading full stop is not a word-internal separator
+		// Each pair below folded together under the previous bare trailing-'s'
+		// rule; KStem's guards keep them apart.
+		{"invariant-news", "new", "news"},
+		{"short-ops", "op", "ops"},
+		{"short-aws", "aw", "aws"},
+		{"short-ios", "io", "ios"},
+		{"short-dns", "dn", "dns"},
+		{"short-bus", "bu", "bus"},
+		{"two-letter-js", "j", "js"},
+		{"digit-k8s", "k8", "k8s"},
+		{"invariant-atlas", "atla", "atlas"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -192,25 +253,6 @@ func TestLint_TagHygiene_SingleTagManyNodesNoFinding(t *testing.T) {
 	})
 	if n := len(findingsFor(Lint(b, LintOptions{}), "tag-hygiene")); n != 0 {
 		t.Fatalf("one tag on many nodes is not drift; expected 0 tag-hygiene findings, got %d", n)
-	}
-}
-
-// The -is/-us/-ss digraph class (real-corpus measurement: 65 such tags, zero
-// collisions) must each be silent — guards the trailing-'s' rule without needing
-// a stop-list. Each planted on a distinct node with an unrelated sibling.
-func TestLint_TagHygiene_DigraphClassSilent(t *testing.T) {
-	digraphs := []string{"hormesis", "hysteresis", "css", "freshness", "blast-radius", "gpt-oss"}
-	for _, d := range digraphs {
-		t.Run(d, func(t *testing.T) {
-			b := mkLintBundle(t, map[string]string{
-				"index.md": "---\ntype: Index\ntitle: Index\n---\n\n# Index\n\n- [A](a.md)\n- [B](b.md)\n",
-				"a.md":     lintDocTags("Concept", "A", []string{d}, "Body."),
-				"b.md":     lintDocTags("Concept", "B", []string{"kubernetes"}, "Body."),
-			})
-			if n := len(findingsFor(Lint(b, LintOptions{}), "tag-hygiene")); n != 0 {
-				t.Fatalf("digraph tag %q must not collide with an unrelated sibling; got %d findings", d, n)
-			}
-		})
 	}
 }
 

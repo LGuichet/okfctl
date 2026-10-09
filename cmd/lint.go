@@ -80,6 +80,14 @@ func newLintCmd() *cobra.Command {
 			"node with the same basename exists elsewhere — a moved or mistyped path (a defect), " +
 			"distinct from a genuinely unwritten concept (a coverage gap, which analyze reports " +
 			"advisorily and lint stays quiet on).\n\n" +
+			"tag-hygiene reports two or more `tags` spellings that fold to one canonical form: " +
+			"case and surrounding space are ignored, as are separators (run-book, run_book, " +
+			"run book, ci/cd, and node.js match runbook, cicd, and nodejs), and a plural folds " +
+			"onto its singular only when that singular is itself a tag in the bundle, using " +
+			"KStem's plural rules (short tags such as aws, ops, and js are never stemmed). The " +
+			"fold is a heuristic, so review a finding before normalizing. Like type-hygiene, it " +
+			"never rejects a value: it only reports spellings that fold together, so a curator " +
+			"can pick one.\n\n" +
 			"--semantic adds similarity-driven checks (similar-but-unlinked pairs, nodes with " +
 			"no semantic neighbors) by reading the index built by 'okfctl-search index build'. " +
 			"Core only reads that index, so no embedding model is needed to lint.",

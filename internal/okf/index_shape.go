@@ -144,9 +144,10 @@ func sharedTagList(folded map[string]foldedTag, min, max int) ([]string, bool) {
 // dirShape returns the tool-owned shape suffix for a subdirectory entry (OKF §8
 // progressive disclosure), as trailing parenthesised text with a leading space,
 // e.g. ` (37 concepts · Application, Concept, Map · shared tags: ux, layout) · 46 in subtree`.
-// It aggregates over the child directory's OWN IMMEDIATE concept nodes (not the
-// whole subtree): the count, the distinct types in full (sorted, §7.4 leaves the
-// type vocabulary open so every type prints as-is), and the shared tags (§4.1).
+// It renders the child's DirShape (see Shape), which aggregates over the child
+// directory's OWN IMMEDIATE concept nodes (not the whole subtree): the count,
+// the distinct types in full (sorted, §7.4 leaves the type vocabulary open so
+// every type prints as-is), and the shared tags (§4.1).
 // The `· N in subtree` total is appended only when the child has content-bearing
 // descendants (subtree count > own count). Returns "" when disabled.
 //
@@ -158,41 +159,20 @@ func dirShape(b *Bundle, childDir string, opts IndexShapeOptions) string {
 	if !opts.Enabled {
 		return ""
 	}
-
-	// Own immediate concepts of childDir.
-	ownPaths := conceptsIn(b, childDir) // sorted, deterministic
-	own := len(ownPaths)
-
-	typeSet := map[string]bool{}
-	perNodeTags := make([][]string, 0, own)
-	for _, p := range ownPaths {
-		n := b.Nodes[p]
-		if t := strings.TrimSpace(n.Type()); t != "" {
-			typeSet[t] = true
-		}
-		perNodeTags = append(perNodeTags, nodeTags(n))
-	}
+	s := Shape(b, childDir, opts)
 
 	// Segment 1: the concept count (pluralized).
-	var segs []string
-	segs = append(segs, fmt.Sprintf("%d %s", own, pluralConcepts(own)))
+	segs := []string{fmt.Sprintf("%d %s", s.Own, pluralConcepts(s.Own))}
 
 	// Segment 2: types in full, sorted, deduped.
-	if len(typeSet) > 0 {
-		types := make([]string, 0, len(typeSet))
-		for t := range typeSet {
-			types = append(types, t)
-		}
-		sort.Strings(types)
-		segs = append(segs, strings.Join(types, ", "))
+	if len(s.Types) > 0 {
+		segs = append(segs, strings.Join(s.Types, ", "))
 	}
 
 	// Segment 3: shared tags (omitted entirely when none qualifies).
-	folded := foldTags(perNodeTags)
-	tags, truncated := sharedTagList(folded, opts.TagMin, opts.TagMax)
-	if len(tags) > 0 {
-		seg := "shared tags: " + strings.Join(tags, ", ")
-		if truncated {
+	if len(s.SharedTags) > 0 {
+		seg := "shared tags: " + strings.Join(s.SharedTags, ", ")
+		if s.TagsTruncated {
 			seg += ", …"
 		}
 		segs = append(segs, seg)
@@ -201,8 +181,8 @@ func dirShape(b *Bundle, childDir string, opts IndexShapeOptions) string {
 	suffix := " (" + strings.Join(segs, " · ") + ")"
 
 	// Subtree total: only when the child has deeper content-bearing dirs.
-	if sub := subtreeConceptCount(b, childDir); sub > own {
-		suffix += fmt.Sprintf(" · %d in subtree", sub)
+	if s.Subtree > s.Own {
+		suffix += fmt.Sprintf(" · %d in subtree", s.Subtree)
 	}
 	return suffix
 }

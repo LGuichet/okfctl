@@ -176,8 +176,18 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	if IsReservedPath(old) || IsReservedPath(new) {
 		return fmt.Errorf("cannot move reserved file (%s -> %s)", old, new)
 	}
-	oldAbs := filepath.Join(root, filepath.FromSlash(old))
-	newAbs := filepath.Join(root, filepath.FromSlash(new))
+	// §3: both ends of the move stay inside the bundle root. Checked before
+	// any rewrite so a refused move leaves every inbound link untouched; the
+	// control-character refusal also keeps a line break out of the rewritten
+	// link text.
+	oldAbs, err := fsutil.ResolveInRoot(root, old)
+	if err != nil {
+		return fmt.Errorf("move source %s: %w", old, err)
+	}
+	newAbs, err := fsutil.ResolveInRoot(root, new)
+	if err != nil {
+		return fmt.Errorf("move destination %s: %w", new, err)
+	}
 	if _, err := os.Stat(newAbs); err == nil {
 		return fmt.Errorf("destination already exists: %s", new)
 	} else if !os.IsNotExist(err) {

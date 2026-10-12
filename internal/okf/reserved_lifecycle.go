@@ -22,6 +22,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // normalizeEOL folds CRLF to LF so a CRLF-checked-out reserved file (Windows
@@ -508,7 +510,7 @@ func WriteIndexWithOptions(b *Bundle, opts IndexShapeOptions) error {
 		if existing, rerr := os.ReadFile(p); rerr == nil && usesCRLF(string(existing)) { //nolint:gosec // G304: reading the tool's own generated index file
 			out = strings.ReplaceAll(rendered, "\n", "\r\n")
 		}
-		if err := os.WriteFile(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
 			return err
 		}
 	}
@@ -616,7 +618,7 @@ func AppendLog(root, message string) error {
 	if err != nil {
 		// Create a fresh §9 log with the default title. A new file is always LF.
 		out := logHeader + "## " + today + "\n* " + message + "\n"
-		return os.WriteFile(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
+		return fsutil.WriteFileAtomic(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
 	}
 
 	// Normalize on read (issue #185, applied to log.md): a CRLF-checked-out log
@@ -641,7 +643,7 @@ func AppendLog(root, message string) error {
 	if usesCRLF(string(existing)) {
 		out = strings.ReplaceAll(rendered, "\n", "\r\n")
 	}
-	return os.WriteFile(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
+	return fsutil.WriteFileAtomic(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
 }
 
 // ReadLog returns the log.md body (empty string if the file is absent).

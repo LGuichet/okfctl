@@ -17,6 +17,8 @@ package okf
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // SpecVersion is the OKF spec version this build targets.
@@ -49,7 +51,7 @@ func Scaffold(dir string) error {
 		".okf":     "okf_version: " + SpecVersion + "\n",
 	}
 	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil { //nolint:gosec // G306: a scaffolded reserved file is shareable bundle content; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(filepath.Join(dir, name), []byte(body), 0o644); err != nil { //nolint:gosec // G306: a scaffolded reserved file is shareable bundle content; 0o644 is intended
 			return err
 		}
 	}

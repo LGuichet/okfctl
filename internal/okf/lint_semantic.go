@@ -17,6 +17,7 @@ package okf
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Neighbor is one ranked semantic neighbor of a node: the neighbor's path and
@@ -144,8 +145,8 @@ func lintSimilarUnlinked(b *Bundle, idx SemanticIndex, threshold float64) []Lint
 		out = append(out, LintFinding{
 			Check: "similar-unlinked",
 			Path:  p.a,
-			Message: fmt.Sprintf("%.2f semantically similar to %s with no link between them — missing cross-reference?",
-				score, p.z),
+			Message: fmt.Sprintf("%.2f semantically similar to %s with no link between them — missing cross-reference? resolve with: okfctl node link %s %s",
+				score, p.z, shellArg(p.a), shellArg(p.z)),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Message < out[j].Message })
@@ -228,4 +229,23 @@ func joinComma(paths []string) string {
 		out += p
 	}
 	return out
+}
+
+// shellArg renders a bundle path as one POSIX shell word for a copy-pasteable
+// hint: bare when it holds only safe characters, else single-quoted with any
+// embedded quote closed, backslash-escaped, and reopened. Lint-message
+// decoration only: this is not an
+// OKF rule and changes no check's verdict.
+func shellArg(s string) string {
+	safe := s != ""
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("/._-+:@%,=", r)) {
+			safe = false
+			break
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

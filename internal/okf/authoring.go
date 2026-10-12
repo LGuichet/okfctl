@@ -50,18 +50,11 @@ func NewNodeFromTemplate(root, relPath, typ, title string, t Template) (string, 
 	if !strings.HasSuffix(relPath, ".md") {
 		relPath += ".md"
 	}
-	abs := filepath.Join(root, filepath.FromSlash(relPath))
-	rootAbs, err := filepath.Abs(root)
+	// §3: the bundle is its directory tree, so the node must land inside it—
+	// lexically and through any symlinked or junctioned directory on the way.
+	abs, err := fsutil.ResolveInRoot(root, relPath)
 	if err != nil {
-		return "", err
-	}
-	absAbs, err := filepath.Abs(abs)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(rootAbs, absAbs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("node path escapes the bundle root: %s", relPath)
+		return "", fmt.Errorf("node path %s: %w", relPath, err)
 	}
 	if _, err := os.Stat(abs); err == nil {
 		return "", fmt.Errorf("node already exists: %s", relPath)

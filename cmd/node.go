@@ -319,6 +319,7 @@ func newNodeCmd() *cobra.Command {
 
 	node.AddCommand(newNodeRefreshCmd())
 	node.AddCommand(newNodePromoteCmd())
+	node.AddCommand(newNodeLinkCmd())
 	return node
 }
 

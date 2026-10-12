@@ -17,6 +17,8 @@ package okf
 import (
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/lexical"
 )
 
 // SearchField names a lexical match surface. A lexical query with no field
@@ -39,20 +41,32 @@ const (
 )
 
 // SearchResult is one lexical hit: the matched node plus the fields the query
-// matched on (sorted, deduped), so a caller can explain WHY a node matched.
+// matched on (sorted, deduped), so a caller can explain WHY a node matched, and
+// its BM25F relevance Score (0 when the node matched by substring only—see
+// Search).
 type SearchResult struct {
 	Path         string   `json:"path"`
 	Title        string   `json:"title"`
 	Type         string   `json:"type"`
 	Neighborhood string   `json:"neighborhood"`
 	MatchedOn    []string `json:"matched_on"`
+	Score        float64  `json:"score"`
 }
 
 // Search runs a case-insensitive lexical query over a bundle's concept nodes.
-// Reserved files (index.md/log.md) are never search results. An empty query
-// returns no results (a lexical search needs a term). Results are sorted by
-// path for deterministic output. field restricts the match surface; FieldAny
-// searches title, tag, type, and body substring together.
+// Reserved files (index.md/log.md, OKF §3.1) are never search results. An empty
+// query returns no results (a lexical search needs a term). field restricts the
+// match surface; FieldAny searches title, tag, type, and body substring
+// together.
+//
+// The MATCH SET is the substring match it has always been (PRD §6.3): a node is
+// a result when the query is a case-insensitive substring of a requested field.
+// Each result additionally carries its BM25F Score over the same field surface,
+// which is 0 for a node that matches by substring but shares no stemmed content
+// token with the query (e.g. `ci` inside `decision`). Results are returned
+// sorted by PATH, the historical contract; call RankResults for relevance
+// order. Ranking is consumer-side behavior—OKF §1 leaves query infrastructure
+// out of the spec.
 func Search(b *Bundle, query string, field SearchField) []SearchResult {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
@@ -80,7 +94,84 @@ func Search(b *Bundle, query string, field SearchField) []SearchResult {
 			MatchedOn:    matched,
 		})
 	}
+	if len(out) == 0 {
+		return out
+	}
+	scores := lexical.NewIndex(LexicalDocuments(b), FieldWeights(field)).Scores(query)
+	for i := range out {
+		out[i].Score = scores[out[i].Path]
+	}
 	return out
+}
+
+// RankResults orders rs by relevance: Score descending, ties broken by path
+// ascending, so the order is total and deterministic. Substring-only matches
+// (Score 0) therefore follow every scored hit, in path order.
+func RankResults(rs []SearchResult) {
+	sort.SliceStable(rs, func(i, j int) bool {
+		if rs[i].Score != rs[j].Score {
+			return rs[i].Score > rs[j].Score
+		}
+		return rs[i].Path < rs[j].Path
+	})
+}
+
+// FieldWeights maps a --field restriction onto BM25F weights: FieldAny uses
+// lexical.DefaultWeights (title > tags > type > body); a single field keeps
+// only that field's weight, so both its scores and its document frequencies
+// come from that surface alone.
+func FieldWeights(field SearchField) lexical.Weights {
+	d := lexical.DefaultWeights
+	switch field {
+	case FieldTitle:
+		return lexical.Weights{Title: d.Title}
+	case FieldTag:
+		return lexical.Weights{Tags: d.Tags}
+	case FieldType:
+		return lexical.Weights{Type: d.Type}
+	case FieldBody:
+		return lexical.Weights{Body: d.Body}
+	default:
+		return d
+	}
+}
+
+// LexicalDocuments projects the bundle's concept nodes (never the reserved
+// index.md/log.md, OKF §3.1) onto the four lexical surfaces BM25 ranks over:
+// title (frontmatter title, or the file base name—OKF §4.1 lets a consumer
+// derive it), tags, type, and body. Sorted by path. A caller that narrows its
+// candidates (the okfctl-search plugin's filters) can filter this slice before
+// handing it to lexical.NewIndex.
+func LexicalDocuments(b *Bundle) []lexical.Document {
+	if b == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(b.Nodes))
+	for p := range b.Nodes {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	docs := make([]lexical.Document, 0, len(paths))
+	for _, p := range paths {
+		n := b.Nodes[p]
+		docs = append(docs, lexical.Document{
+			Path:  p,
+			Title: nodeTitle(n),
+			Tags:  nodeTags(n),
+			Type:  n.Type(),
+			Body:  n.Body,
+		})
+	}
+	return docs
+}
+
+// RankBM25 ranks the bundle's concept nodes by BM25F relevance to query over
+// the field surface: every node with a positive score, score descending, ties
+// by path. Unlike Search it is purely TERM-wise (no substring match set), so it
+// is the ranking a fusion step (hybrid search) should consume. An empty or
+// all-stopword query returns an empty slice.
+func RankBM25(b *Bundle, query string, field SearchField) []lexical.Scored {
+	return lexical.Rank(LexicalDocuments(b), query, FieldWeights(field))
 }
 
 // matchedFields returns the sorted, deduped set of fields (among the requested

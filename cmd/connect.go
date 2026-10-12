@@ -76,8 +76,11 @@ func newConnectCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 
-			// Existing checkout of the source: fast-forward it.
-			if okf.IsGitWorkTree(dir) {
+			// Existing checkout of the source: fast-forward it. dir must be the
+			// checkout's own top level with this source as its origin; merely
+			// being inside some work tree (a subdirectory of another repo, or a
+			// checkout of a different origin) falls through to the refusal below.
+			if okf.IsCheckoutOf(dir, url) {
 				if err := okf.PullFastForward(dir); err != nil {
 					return err
 				}
@@ -85,7 +88,7 @@ func newConnectCmd() *cobra.Command {
 				return nil
 			}
 
-			// A non-empty, non-repo directory must not be clobbered.
+			// A non-empty directory that isn't that checkout must not be clobbered.
 			if nonEmpty, err := dirIsNonEmpty(dir); err != nil {
 				return err
 			} else if nonEmpty {

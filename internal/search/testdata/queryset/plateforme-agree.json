@@ -1,0 +1,24 @@
+{
+  "bundle": "plateforme-agree",
+  "queries": [
+    {"id": "pa-sales-prospecting", "query": "isSalesProspectingForbidden", "kind": "exact-term", "relevant": ["api/directory-service.md"]},
+    {"id": "pa-mob-req", "query": "MOB_REQ", "kind": "exact-term", "relevant": ["mobility/mob-req-csv.md"]},
+    {"id": "pa-tt-81", "query": "TT-81", "kind": "exact-term", "relevant": ["e-reporting/f10-transaction-category-mapping.md"]},
+    {"id": "pa-secnumcloud", "query": "SecNumCloud", "kind": "exact-term", "relevant": ["audit/hosting-security-and-eu-localization.md"]},
+    {"id": "pa-cdar", "query": "CDAR", "kind": "exact-term", "relevant": ["e-invoicing/lifecycle-message-format.md"]},
+    {"id": "pa-bt-8", "query": "BT-8", "kind": "exact-term", "relevant": ["e-invoicing/vat-liability-code.md"]},
+    {"id": "pa-annexe-7", "query": "Annexe 7", "kind": "exact-term", "relevant": ["e-reporting/f10-schematron.md"]},
+    {"id": "pa-allotissement", "query": "allotissement", "kind": "exact-term", "relevant": ["ppf/flow-batching-and-limits.md"]},
+    {"id": "pa-monaco", "query": "Monaco", "kind": "exact-term", "relevant": ["e-reporting/monaco-operations.md"]},
+    {"id": "pa-br-fr", "query": "BR-FR", "kind": "exact-term", "relevant": ["e-invoicing/business-rules-fr.md"]},
+    {"id": "pa-matelas", "query": "matelas", "kind": "exact-term", "relevant": ["levee-reserves/test-data-matelas.md"]},
+    {"id": "pa-change-provider", "query": "moving a company to a different e-invoicing provider", "kind": "paraphrase", "relevant": ["mobility/switch-process.md"]},
+    {"id": "pa-data-location", "query": "where the invoice servers must physically be located", "kind": "paraphrase", "relevant": ["audit/hosting-security-and-eu-localization.md"]},
+    {"id": "pa-wrong-bill", "query": "refunding a customer after a wrong bill", "kind": "paraphrase", "relevant": ["e-invoicing/credit-notes-and-corrections.md"]},
+    {"id": "pa-reform-start", "query": "when does the reform start and who must comply", "kind": "paraphrase", "relevant": ["reform/scope-and-timeline.md"]},
+    {"id": "pa-accountant-access", "query": "letting an accounting firm call the API for a client company", "kind": "paraphrase", "relevant": ["api/delegation.md"]},
+    {"id": "pa-callback", "query": "getting notified by a callback when a new flow arrives", "kind": "paraphrase", "relevant": ["api/webhooks.md"]},
+    {"id": "pa-no-answer", "query": "what to do when the public platform never answers a submission", "kind": "paraphrase", "relevant": ["ppf/missing-return-flow-and-resubmission.md"]},
+    {"id": "pa-abbreviations", "query": "meaning of the abbreviations used in the documents", "kind": "paraphrase", "relevant": ["reference/glossary.md"]}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "bundle": "nf525-lne",
+  "queries": [
+    {"id": "nf525-gtpca", "query": "GTPCA", "kind": "exact-term", "relevant": ["infocert-referential/grand-totals.md"]},
+    {"id": "nf525-fond-de-caisse", "query": "fond de caisse", "kind": "exact-term", "relevant": ["infocert-referential/cash-float-and-backup.md"]},
+    {"id": "nf525-arrhes", "query": "arrhes", "kind": "exact-term", "relevant": ["infocert-referential/treasury-operations.md"]},
+    {"id": "nf525-l80o", "query": "L. 80 O", "kind": "exact-term", "relevant": ["legal-framework/justification-and-control.md"]},
+    {"id": "nf525-isca", "query": "ISCA", "kind": "exact-term", "relevant": ["legal-framework/isca-conditions.md"]},
+    {"id": "nf525-scu", "query": "SCU", "kind": "exact-term", "relevant": ["mapping/scu-switching.md"]},
+    {"id": "nf525-mode-ecole", "query": "mode école", "kind": "exact-term", "relevant": ["lne-referential/exigence-05-training-test-mode.md", "infocert-referential/special-functions-and-administration.md"]},
+    {"id": "nf525-codes-evenements", "query": "codes événements", "kind": "exact-term", "relevant": ["r19-jet/codes-evenements.md"]},
+    {"id": "nf525-keep-sales-data", "query": "how long must the sales data be kept", "kind": "paraphrase", "relevant": ["lne-referential/exigence-16-data-retention.md", "lne-referential/exigence-17-archive-retention.md", "infocert-referential/retention-and-purge.md"]},
+    {"id": "nf525-train-staff", "query": "using the till to train new staff without real sales", "kind": "paraphrase", "relevant": ["lne-referential/exigence-05-training-test-mode.md", "infocert-referential/special-functions-and-administration.md"]},
+    {"id": "nf525-delete-old-records", "query": "deleting old records from the register", "kind": "paraphrase", "relevant": ["lne-referential/exigence-13-purge.md", "lne-referential/exigence-14-partial-purge.md", "infocert-referential/retention-and-purge.md"]},
+    {"id": "nf525-drawer-money", "query": "money left in the drawer at the start of the day", "kind": "paraphrase", "relevant": ["infocert-referential/cash-float-and-backup.md"]},
+    {"id": "nf525-inspector-access", "query": "letting the tax inspector read the recorded data", "kind": "paraphrase", "relevant": ["lne-referential/exigence-19-tax-administration-access.md", "infocert-referential/tax-control-aid.md"]},
+    {"id": "nf525-no-tampering", "query": "preventing anyone from altering recorded sales", "kind": "paraphrase", "relevant": ["lne-referential/exigence-08-data-inalterability.md", "legal-framework/isca-conditions.md"]},
+    {"id": "nf525-end-of-period", "query": "end of day, month and year closing", "kind": "paraphrase", "relevant": ["lne-referential/exigence-06-closings.md", "infocert-referential/period-closings.md"]},
+    {"id": "nf525-reprint", "query": "printing a second copy of a receipt", "kind": "paraphrase", "relevant": ["infocert-referential/duplicatas.md", "r13-receipt/duplicatas.md"]}
+  ]
+}

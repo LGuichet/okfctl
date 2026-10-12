@@ -869,3 +869,114 @@ func TestPlugin_DecayFloorBoundariesAccepted(t *testing.T) {
 		}
 	}
 }
+
+// TestPlugin_HybridAcceptedAndOffUnchanged is the default-off control for
+// --hybrid: WITHOUT the flag, output is byte-identical to a bare query; WITH it,
+// the query runs and every printed score is a fused RRF score (at most 2/61).
+func TestPlugin_HybridAcceptedAndOffUnchanged(t *testing.T) {
+	dir := writeScopedBundle(t)
+	if _, err := runPlugin(t, "index", "build", dir); err != nil {
+		t.Fatal(err)
+	}
+	base, err := runPlugin(t, "--semantic", "structure acidity", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, err := runPlugin(t, "--semantic", "structure acidity", "--hybrid=false", dir)
+	if err != nil {
+		t.Fatalf("--hybrid=false: %v", err)
+	}
+	if base != off {
+		t.Errorf("--hybrid=false changed output:\nbase=%q\noff=%q", base, off)
+	}
+	on, err := runPlugin(t, "--semantic", "structure acidity", "--hybrid", dir)
+	if err != nil {
+		t.Fatalf("--hybrid: %v", err)
+	}
+	if len(parseTopPaths(on)) == 0 {
+		t.Fatalf("--hybrid returned no results")
+	}
+	for _, ln := range strings.Split(on, "\n") {
+		if ln == "" || strings.HasPrefix(ln, "\t") {
+			continue
+		}
+		var score float64
+		if _, err := fmt.Sscanf(strings.Split(ln, "\t")[0], "%g", &score); err != nil {
+			t.Fatalf("unparseable score line %q: %v", ln, err)
+		}
+		if score <= 0 || score > 2.0/61+1e-4 {
+			t.Errorf("hybrid score %v outside (0, 2/61]", score)
+		}
+	}
+}
+
+// TestPlugin_HybridRejectsLexicalGate: both flags re-order the semantic list
+// with lexical evidence; combining them is a usage error, not a silent stack.
+func TestPlugin_HybridRejectsLexicalGate(t *testing.T) {
+	dir := writeScopedBundle(t)
+	if _, err := runPlugin(t, "index", "build", dir); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runPlugin(t, "--semantic", "structure acidity", "--hybrid", "--lexical-gate", dir)
+	if err == nil || !strings.Contains(err.Error(), "--lexical-gate") {
+		t.Fatalf("--hybrid --lexical-gate: err = %v, want a usage error naming --lexical-gate", err)
+	}
+}
+
+// TestPlugin_HybridFiltersApplyToBothSides: a §4.1 scope filter drops a node
+// from the fused list even when it is the only node naming the query term.
+func TestPlugin_HybridFiltersApplyToBothSides(t *testing.T) {
+	dir := writeScopedBundle(t)
+	if _, err := runPlugin(t, "index", "build", dir); err != nil {
+		t.Fatal(err)
+	}
+	all, err := runPlugin(t, "--semantic", "roast", "--hybrid", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top := parseTopPaths(all); len(top) == 0 || top[0] != "coffee/roast.md" {
+		t.Fatalf("precondition: the only node naming 'roast' should lead; got %v", top)
+	}
+	for _, args := range [][]string{
+		{"--not-path", "coffee/"},
+		{"--path", "wine/"},
+		{"--type", "Playbook"},
+	} {
+		argv := append([]string{"--semantic", "roast", "--hybrid"}, args...)
+		out, err := runPlugin(t, append(argv, dir)...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		for _, p := range parseTopPaths(out) {
+			if p == "coffee/roast.md" {
+				t.Errorf("%v: filtered-out node coffee/roast.md leaked into hybrid results", args)
+			}
+		}
+	}
+}
+
+// TestPlugin_HybridComposesWithDecayAndK: --hybrid composes with recency decay,
+// the relevance floor and --k without error, and --k bounds the fused list.
+func TestPlugin_HybridComposesWithDecayAndK(t *testing.T) {
+	dir := writeScopedBundle(t)
+	if _, err := runPlugin(t, "index", "build", dir); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runPlugin(t, "--semantic", "structure acidity", "--hybrid", "--half-life", "30", "--min-relevance", "0.01", "--k", "2", dir)
+	if err != nil {
+		t.Fatalf("--hybrid + decay: %v", err)
+	}
+	if n := len(parseTopPaths(out)); n == 0 || n > 2 {
+		t.Errorf("--hybrid --k 2 returned %d results", n)
+	}
+}
+
+func TestPlugin_HelpDocumentsHybrid(t *testing.T) {
+	out, err := runPlugin(t, "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "--hybrid") {
+		t.Errorf("help output should document --hybrid; got:\n%s", out)
+	}
+}

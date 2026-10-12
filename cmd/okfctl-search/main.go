@@ -91,6 +91,7 @@ func newSearchCmd() *cobra.Command {
 		decayFloor   float64
 		minRelevance float64
 		lexicalGate  bool
+		hybrid       bool
 	)
 
 	root := &cobra.Command{
@@ -121,6 +122,9 @@ func newSearchCmd() *cobra.Command {
 			if halfLife < 0 {
 				return fmt.Errorf("--half-life must be a non-negative number of days, got %v", halfLife)
 			}
+			if hybrid && lexicalGate {
+				return fmt.Errorf("--hybrid and --lexical-gate cannot be combined: both re-order the semantic results with lexical evidence")
+			}
 			e, err := resolveEmbedder(embedderName, modelPath)
 			if err != nil {
 				return err
@@ -148,7 +152,7 @@ func newSearchCmd() *cobra.Command {
 			// denormalized onto the index would go stale. The lexical gate needs the
 			// live title+body prose to match terms against, which the index does not
 			// carry at all.
-			needBundle := !opts.Filter.IsEmpty() || halfLife > 0 || lexicalGate
+			needBundle := !opts.Filter.IsEmpty() || halfLife > 0 || lexicalGate || hybrid
 			var b *okf.Bundle
 			if needBundle {
 				b, err = okf.Load(dir)
@@ -189,7 +193,16 @@ func newSearchCmd() *cobra.Command {
 				opts.LexicalGate = search.BuildLexicalGate(b, semantic)
 			}
 
-			res, err := search.QueryWith(s, e, semantic, k, opts)
+			var res []search.Result
+			if hybrid {
+				// Hybrid: BM25F over the live bundle fused with the semantic ranking
+				// by reciprocal rank fusion (search.RRFK). Filters select the
+				// candidates before both rankings; decay and --min-relevance act on
+				// the semantic side only. Ranking is consumer-side (OKF v0.2 §1).
+				res, err = search.HybridQuery(s, e, b, semantic, k, opts)
+			} else {
+				res, err = search.QueryWith(s, e, semantic, k, opts)
+			}
 			if err != nil {
 				return err
 			}
@@ -236,6 +249,10 @@ func newSearchCmd() *cobra.Command {
 	// term-wise lexical match set and preserves the lexical tail; degrades to pure
 	// semantic on an all-stopword or over-broad query.
 	root.Flags().BoolVar(&lexicalGate, "lexical-gate", false, "gate semantic results by a term-wise lexical match, preserving lexical recall (off by default; no-op on all-stopword or over-broad queries)")
+	// --hybrid fuses BM25F and semantic rankings by reciprocal rank fusion (k=60).
+	// Opt-in until the query-set measurement shows it beats semantic on both
+	// recall@5 and MRR on the real corpus.
+	root.Flags().BoolVar(&hybrid, "hybrid", false, "fuse BM25 lexical and semantic rankings by reciprocal rank fusion (off by default; cannot be combined with --lexical-gate)")
 
 	root.AddCommand(newIndexCmd(&embedderName, &modelPath))
 	root.AddCommand(newRelatedCmd(&k))

@@ -63,6 +63,21 @@ protocol with `cwest/knowledge-base` so vectors are cross-verifiable.
   carries no discriminating signal—e.g. `agent` matches 73% of the reference
   corpus). Composes with `--path`/`--type`/`--tag` (which constrain both the
   semantic band and the appended lexical tail) and with `--half-life`.
+- `--hybrid` (off by default) fuses two rankings into one: the semantic ranking
+  and the BM25F lexical ranking `okfctl search` uses, by **reciprocal rank
+  fusion**—each node scores `1/(60 + rank)` from each list it appears in, and
+  the sums are sorted (ties by path). The printed score is that fused score (at
+  most `2/61`), not a cosine. A rare identifier the embedding blurs (`BT-8`,
+  `MOB_REQ`) is lifted by its lexical rank; a paraphrase is carried by its
+  semantic rank. `--path`/`--type`/`--tag` and their `--not-*` forms select the
+  candidates **before** both rankings; `--half-life`, `--decay-floor` and
+  `--min-relevance` act on the semantic side only, so a node below the
+  relevance floor can still enter through its lexical rank. Cannot be combined
+  with `--lexical-gate`. One known property: a node that semantic ranks first
+  but that shares no word with the query can drop below nodes that appear in
+  both lists. `--hybrid` stays opt-in until the query-set benchmark
+  (`docs/specs/2026-10-12-search-hybrid.md`) shows it beats semantic on both
+  recall@5 and MRR with a real model.
 
 ### Real semantic search with `--embedder model2vec`
 

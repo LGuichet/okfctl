@@ -382,3 +382,27 @@ func TestApplyLink_RefusesConcurrentEdit(t *testing.T) {
 		t.Fatalf("concurrent edit clobbered: %q", got)
 	}
 }
+
+// A link inside a fenced code block already counts as an edge for the graph
+// scanner and so for lint's similar-unlinked; node link agrees and reports a
+// no-op rather than adding a second link lint would see as redundant.
+func TestPlanLink_FencedLinkCountsAsExisting(t *testing.T) {
+	src := nodeSrc("A") + "```md\n[b](b.md)\n```\n"
+	root, b := mkMoveBundle(t, map[string]string{
+		"a.md": src,
+		"b.md": nodeSrc("B"),
+	})
+	if !edgeExists(b, "a.md", "b.md") {
+		t.Fatal("precondition: graph scanner should count the fenced link")
+	}
+	p, err := PlanLink(root, b, "a.md", "b.md", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Exists {
+		t.Fatalf("fenced link not treated as existing: %+v", p)
+	}
+	if got := readRel(t, root, "a.md"); got != src {
+		t.Fatalf("file changed: %q", got)
+	}
+}

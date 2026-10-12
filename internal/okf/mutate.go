@@ -80,22 +80,8 @@ func scanNodeLinks(b *Bundle, dir, body string) []scannedLink {
 		// leading whitespace + any CommonMark title), preserved verbatim.
 		titleTail := raw[len(url):]
 
-		var resolved string
-		var form linkForm
-		if strings.HasPrefix(url, "/") {
-			// OKF §5.1: a "/"-absolute link resolves against the bundle root
-			// (the loaded bundle dir). okfctl loads exactly one bundle rooted at
-			// the passed dir, so "/x/y.md" resolves to the node keyed "x/y.md".
-			if abs := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(url, "/"))); b.Nodes[abs] != nil {
-				resolved, form = abs, formRootAbs
-			} else {
-				continue
-			}
-		} else if norm := filepath.ToSlash(filepath.Clean(url)); b.Nodes[norm] != nil {
-			resolved, form = norm, formRootRel
-		} else if rel := filepath.ToSlash(filepath.Clean(filepath.Join(dir, url))); b.Nodes[rel] != nil {
-			resolved, form = rel, formDirRel
-		} else {
+		resolved, form := resolveLinkURL(b, dir, url)
+		if form == formNone {
 			continue
 		}
 		out = append(out, scannedLink{
@@ -109,6 +95,31 @@ func scanNodeLinks(b *Bundle, dir, body string) []scannedLink {
 		})
 	}
 	return out
+}
+
+// resolveLinkURL resolves one link destination url, written in a node whose
+// bundle-relative directory is dir, to the node it names: "/"-absolute first,
+// then root-relative, then dir-relative. It returns ("", formNone) when the url
+// names no loaded node. It is the single resolution rule behind scanNodeLinks
+// (and so graph edges, lint, and move rewrites) and node link's idempotency
+// check, so "links to X" means the same thing everywhere.
+func resolveLinkURL(b *Bundle, dir, url string) (string, linkForm) {
+	if strings.HasPrefix(url, "/") {
+		// OKF §6.1: a "/"-absolute link resolves against the bundle root
+		// (the loaded bundle dir). okfctl loads exactly one bundle rooted at
+		// the passed dir, so "/x/y.md" resolves to the node keyed "x/y.md".
+		if abs := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(url, "/"))); b.Nodes[abs] != nil {
+			return abs, formRootAbs
+		}
+		return "", formNone
+	}
+	if norm := filepath.ToSlash(filepath.Clean(url)); b.Nodes[norm] != nil {
+		return norm, formRootRel
+	}
+	if rel := filepath.ToSlash(filepath.Clean(filepath.Join(dir, url))); b.Nodes[rel] != nil {
+		return rel, formDirRel
+	}
+	return "", formNone
 }
 
 // PlanMove computes the inbound-link rewrites needed to move old->new. It is

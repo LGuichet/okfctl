@@ -15,6 +15,7 @@
 package okf
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -178,5 +179,71 @@ func TestLintSemantic_Deterministic(t *testing.T) {
 				t.Fatalf("run %d differs at %d: %+v != %+v", i, j, again[j], first[j])
 			}
 		}
+	}
+}
+
+// The similar-unlinked finding names the exact command that resolves it, with
+// shell-quoting for a path that needs it. Check, path, and score are unchanged.
+func TestLintSimilarUnlinked_SuggestsNodeLink(t *testing.T) {
+	b := semBundle(t, map[string]string{
+		"a/tannin.md":      "Astringency in red wine.",
+		"a/astringency.md": "The drying grip of a red wine.",
+		"my notes/x.md":    "x",
+		"my notes/it's.md": "y",
+	})
+	idx := SemanticIndex{
+		"a/tannin.md":      {{Path: "a/astringency.md", Score: 0.91}},
+		"a/astringency.md": {{Path: "a/tannin.md", Score: 0.91}},
+		"my notes/x.md":    {{Path: "my notes/it's.md", Score: 0.85}},
+		"my notes/it's.md": {{Path: "my notes/x.md", Score: 0.85}},
+	}
+	got := findingsFor(LintSemantic(b, idx, SemanticOptions{}), "similar-unlinked")
+	if len(got) != 2 {
+		t.Fatalf("want 2 findings, got %+v", got)
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i].Path < got[j].Path })
+	if want := "resolve with: okfctl node link a/astringency.md a/tannin.md"; !strings.HasSuffix(got[0].Message, want) {
+		t.Errorf("message %q does not end with %q", got[0].Message, want)
+	}
+	if want := `okfctl node link 'my notes/it'\''s.md' 'my notes/x.md'`; !strings.HasSuffix(got[1].Message, want) {
+		t.Errorf("message %q does not end with %q", got[1].Message, want)
+	}
+	if !strings.HasPrefix(got[0].Message, "0.91 semantically similar to a/tannin.md") {
+		t.Errorf("score/target prefix changed: %q", got[0].Message)
+	}
+}
+
+// End to end: applying the suggested link clears the finding (positive), and
+// the unrelated pair's finding is unaffected (negative).
+func TestLintSimilarUnlinked_ClearedByNodeLink(t *testing.T) {
+	root, b := mkMoveBundle(t, map[string]string{
+		"a/tannin.md":      nodeSrc("Tannin"),
+		"a/astringency.md": nodeSrc("Astringency"),
+		"b/x.md":           nodeSrc("X"),
+		"b/y.md":           nodeSrc("Y"),
+	})
+	idx := SemanticIndex{
+		"a/tannin.md":      {{Path: "a/astringency.md", Score: 0.91}},
+		"a/astringency.md": {{Path: "a/tannin.md", Score: 0.91}},
+		"b/x.md":           {{Path: "b/y.md", Score: 0.90}},
+		"b/y.md":           {{Path: "b/x.md", Score: 0.90}},
+	}
+	if got := findingsFor(LintSemantic(b, idx, SemanticOptions{}), "similar-unlinked"); len(got) != 2 {
+		t.Fatalf("before: want 2 findings, got %+v", got)
+	}
+	p, err := PlanLink(root, b, "a/astringency.md", "a/tannin.md", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyLink(p); err != nil {
+		t.Fatal(err)
+	}
+	b2, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findingsFor(LintSemantic(b2, idx, SemanticOptions{}), "similar-unlinked")
+	if len(got) != 1 || got[0].Path != "b/x.md" {
+		t.Fatalf("after: want only the b/x.md finding, got %+v", got)
 	}
 }

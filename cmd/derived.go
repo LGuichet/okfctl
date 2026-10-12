@@ -73,6 +73,15 @@ func maintainOnMove(cmd *cobra.Command, dir, oldRel, newRel string) {
 	maintainIndex(cmd, dir)
 }
 
+// logOnLink records an added cross-reference in log.md (OKF §9). It does NOT
+// regenerate index.md: §8 entries carry titles and descriptions, never body
+// links. Best-effort: reported, never fatal.
+func logOnLink(cmd *cobra.Command, dir, from, to string) {
+	if err := okf.AppendLog(dir, "linked "+from+" -> "+to); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not update log.md: %v\n", err)
+	}
+}
+
 // logOnRefresh records a single node's timestamp refresh in log.md. Unlike the
 // maintainOn* helpers it does NOT regenerate index.md — a bulk refresh appends
 // one log line per node and regenerates the index once at the end, so the index

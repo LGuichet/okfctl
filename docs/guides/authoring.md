@@ -56,6 +56,25 @@ okfctl node mv concepts/tannin.md concepts/tannins.md --bundle mykb --dry-run
 form; `--dry-run` shows what would change without writing. `okfctl node rm`
 removes a node and reports any nodes orphaned as a result. Both take `--bundle`.
 
+## Linking nodes
+
+Add a cross-reference without hand-editing the body:
+
+```sh
+okfctl node link concepts/tannin.md concepts/astringency.md --bundle mykb --dry-run
+```
+
+`node link` writes one relative Markdown link (OKF §6.1) whose text is the
+target's title, as a bullet under the source's `## Related` heading (or
+`--section "See also"`), creating the heading at the end of the body if it is
+absent. That placement is an okfctl convention—OKF says nothing about where a
+cross-reference lives. The frontmatter is left byte-for-byte and `modified` is
+not bumped. If the source already links to the target in any spelling (`./`,
+`/`-absolute, with a `#fragment`) the command is a no-op; otherwise one
+`linked <from> -> <to>` entry is appended to `log.md` (§9). Both ends must stay
+inside the bundle (§3), the target must exist, and `index.md`/`log.md` are
+refused (§3.1).
+
 After authoring, keep the index current (see
 [Index and freshness](index-and-freshness.md)) and check curation health (see
 [Curation health](curation-health.md)).

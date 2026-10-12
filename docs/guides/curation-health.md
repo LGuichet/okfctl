@@ -43,6 +43,18 @@ Three deliberate behaviors:
   one `stale-index` finding listing them, so a partial pass never reads as a
   clean one.
 
+Each `similar-unlinked` finding ends with the command that resolves it, ready
+to paste from the bundle root:
+
+```text
+0.91 semantically similar to a/tannin.md with no link between them — missing cross-reference? resolve with: okfctl node link a/astringency.md a/tannin.md
+```
+
+`okfctl node link` adds one relative link under `## Related` (see
+[Authoring](authoring.md#linking-nodes)); rerun `lint --semantic` and the
+finding clears, because the check reads the live link graph. A link in either
+direction is enough, and the command is a no-op if a link already exists.
+
 Findings are only as meaningful as the embedder that built the index. With the
 default `hash` embedder, `similar-unlinked` effectively means "shares
 vocabulary"; with `--embedder model2vec` it means genuinely related subject

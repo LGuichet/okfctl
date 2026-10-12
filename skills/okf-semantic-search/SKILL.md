@@ -148,7 +148,7 @@ Real output (two near-identical unlinked nodes, and an isolated node):
 
 ```sh
 $ okfctl lint mykb --semantic
-0.94 semantically similar to b.md with no link between them — missing cross-reference?
+0.94 semantically similar to b.md with no link between them — missing cross-reference? resolve with: okfctl node link a.md b.md
 no semantically close node (best neighbor 0.17, below 0.20) — dead concept, or missing context?
 ...
 ```

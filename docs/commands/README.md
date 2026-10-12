@@ -563,6 +563,38 @@ Flags:
 ```
 
 
+### okfctl node link
+
+Add a Markdown link from one node to another (idempotent)
+
+link adds a cross-reference from <from> to <to>: a bullet holding a relative Markdown link (OKF §6.1) whose text is <to>'s title, filed under the "## Related" heading of <from>'s body (or --section), which is created at the end of the body if absent. The heading placement is an okfctl authoring convention, not a spec rule. A heading inside a fenced code block is ignored. The frontmatter is preserved byte-for-byte and `modified` is not bumped. If <from> already links to <to> in any spelling (relative, ./, /-absolute, with a #fragment) the command is a no-op. Both paths must stay inside the bundle (OKF §3), <to> must exist, and neither end may be a reserved index.md or log.md (OKF §3.1). A successful link is recorded in log.md (OKF §9). The .md suffix is optional. --dry-run prints the change and writes nothing.
+
+```
+okfctl node link <from> <to> [flags]
+```
+
+Example:
+
+```
+# Link two nodes under ## Related
+  okfctl node link concepts/revenue concepts/net-revenue
+
+  # File the link under another heading
+  okfctl node link concepts/revenue concepts/net-revenue --section "See also"
+
+  # Preview the change without touching disk
+  okfctl node link concepts/revenue concepts/net-revenue --dry-run
+```
+
+Flags:
+
+```
+      --bundle string    bundle directory to operate on (default ".")
+      --dry-run          print the change without touching disk
+      --section string   "##" heading text to file the link under (created if absent) (default "Related")
+```
+
+
 ### okfctl node list
 
 List nodes with their type (§7.3)

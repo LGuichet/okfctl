@@ -226,7 +226,8 @@ func TestResolveInRoot_InBundleSymlinkAccepted(t *testing.T) {
 
 // linkDir links a directory: a symlink where the OS allows it, otherwise (an
 // unprivileged Windows account) a directory junction, which needs no
-// privilege and is followed by filepath.EvalSymlinks just the same.
+// privilege. EvalSymlinks does not follow a junction, so the junction case
+// exercises ResolveInRoot's per-component link check.
 func linkDir(target, link string) error {
 	err := os.Symlink(target, link)
 	if err == nil || runtime.GOOS != "windows" {

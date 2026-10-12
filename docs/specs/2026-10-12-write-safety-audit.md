@@ -1,6 +1,6 @@
 # fix(write)—write-safety audit: atomic, confined, injection-free writes
 
-**Status:** Approved (design) · **Owner:** Casey West · **License:** Apache-2.0
+**Status:** Implemented · **Owner:** Casey West · **License:** Apache-2.0
 **Source of truth:** OKF `SPEC.md` **v0.2** (upstream
 `GoogleCloudPlatform/knowledge-catalog`, header confirmed `**Version 0.2**`)—§3
 (a bundle is a directory tree), §3.1 (reserved filenames), §4 / §4.1 (the
@@ -46,7 +46,7 @@ change, one commit per gap.
 | `migrate apply` → `bumpRootIndexMarker` (root `index.md`, §8/§12) | **gap**—`os.WriteFile` | safe—fixed `<root>/index.md` | safe—`setScalar` + `yaml.Encoder` |
 | `migrate` (plan phase) → plan JSON (`cmd/migrate.go`) | **gap**—`os.WriteFile` | n/a—`--plan` is an explicit output path the user names, not bundle content | safe—`json.MarshalIndent` |
 | `init` → `okf.Scaffold` (`reserved.go`) | **gap**—`os.WriteFile` per file | n/a—`dir` *is* the root being created | safe—fixed content (`SpecVersion` is a constant) |
-| `index build` / auto-maintenance → `okf.WriteIndexWithOptions` (`reserved_lifecycle.go`) | **gap**—`os.WriteFile` | safe—every path derives from `IndexDirs(b)` | safe—the only frontmatter is the §12 `okf_version` marker, emitted with `%q` (a double-quoted, fully escaped scalar that YAML reads back as one string); pinned by a new fuzz target |
+| `index build` / auto-maintenance → `okf.WriteIndexWithOptions` (`reserved_lifecycle.go`) | **gap**—`os.WriteFile` | safe—every path derives from `IndexDirs(b)` | safe—the only frontmatter is the §12 `okf_version` marker, emitted with `%q` (a double-quoted, fully escaped scalar that YAML reads back as one string); the migrate rewrite of the same marker is fuzzed by `FuzzRootIndexMarker` |
 | `log append` / auto-maintenance → `okf.AppendLog` (§9) | **gap**—`os.WriteFile` | safe—fixed `<root>/log.md` | **gap**—the message is flattened at the first `\n` only; a lone `\r` is a CommonMark line ending, so `msg\r## 1999-01-01` forges a §9 date heading |
 | `config set` → `okfconfig.Save` | **gap**—`os.WriteFile` | n/a—fixed user-config path | safe—`json.MarshalIndent` |
 | `plugin install` → `plugin.copyExecutable` | safe—`CreateTemp` in the destination dir + `Rename` | safe—the installed name is `filepath.Base(source)`, so it cannot leave the plugin dir | n/a |
@@ -64,7 +64,10 @@ consumer and reuses the helpers below.
 
 The vector store (`internal/search`), the user config (`internal/okfconfig`),
 and `cmd` all need the atomic writer, and none should import `internal/okf` for
-it, so both helpers live in a tiny leaf package with no okfctl imports.
+it, so both helpers live in a tiny leaf package that imports only the standard
+library. `internal/okfconfig` imports nothing from okfctl today; hosting the
+writer in `internal/okf` would drag the whole bundle model into the config
+package just to save a file.
 
 ```go
 // internal/fsutil/atomicwrite.go
@@ -72,6 +75,7 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error
 
 // internal/fsutil/confine.go
 var ErrEscapesRoot = errors.New("path escapes the bundle root")
+var ErrInvalidPath = errors.New("invalid bundle path")
 func ResolveInRoot(root, rel string) (string, error)
 ```
 
@@ -87,18 +91,28 @@ never ends in `.md`, so a crash-orphaned temp is never loaded as a node.
 **`ResolveInRoot`** turns a user-supplied bundle-relative path into an absolute
 path inside `root`, or refuses it:
 
-- empty, or the root itself (`.`) → refused;
-- a control character (C0 or DEL) anywhere → refused. A path is written into
-  link text by `node mv` / `node promote`; a line break there is the
-  injection vector in the table above;
-- an OS-absolute path with a volume (`C:\x`, `\\server\share`) → refused;
+- empty, or the root itself (`.`, `/`) → `ErrInvalidPath`;
+- a control character (C0 or DEL) anywhere → `ErrInvalidPath`. A path is
+  written into link text by `node mv` / `node promote`; a line break there is
+  the injection vector in the table above;
+- an OS-absolute path with a volume (`C:\x`, `\\server\share`) →
+  `ErrEscapesRoot`;
 - a leading `/` is **kept as bundle-root-relative**, matching §6.1's
   `/`-absolute link form and the behavior `node new` already pins
   (`TestNewNode_RejectsPathEscape`): `/deep/x.md` resolves to `<root>/deep/x.md`;
 - after `Clean`, any `..` that climbs above the root → `ErrEscapesRoot`;
 - the deepest *existing* ancestor of the result is `EvalSymlinks`-resolved and
   must still sit inside the resolved root, so a symlinked directory pointing out
-  of the bundle is refused while an in-bundle symlink is fine.
+  of the bundle is refused while an in-bundle symlink is fine;
+- because `EvalSymlinks` does not follow a Windows directory junction (which an
+  unprivileged account can create), every existing component below the root is
+  also `Lstat`ed, and any symlink or reparse point on the way must itself
+  `Readlink`-resolve inside the root.
+
+Callers wrap the sentinels with `%w`, so `errors.Is(err, fsutil.ErrEscapesRoot)`
+holds at every call site. The tests create a symlink where the OS allows it and
+fall back to a junction (`mklink /J`) on an unprivileged Windows account, so the
+escape tests run rather than skip on Windows.
 
 It returns the lexical absolute path (not the symlink-resolved one), so callers
 write where the user pointed. The check is a pre-write gate, not a kernel-level
@@ -113,9 +127,13 @@ out of scope for a local, single-user CLI.
   `PromotePlan` / `PromoteApply` (the destination), and `MigrateApply`
   (each `plan.nodes[].path`).
 - `PromotePlan` additionally refuses a `--name` that is not a single path
-  segment, or that would produce a reserved filename (§3.1).
-- `bumpOkfSidecar` refuses a `target_version` containing a control character
-  (the sidecar is line-keyed; there is no encoder to route through).
+  segment (`.`, `..`, a `/` or `\`, a control character), or that would
+  produce a reserved filename (§3.1). An empty `--name` keeps its existing
+  meaning (default basename).
+- `MigrateApply` refuses a `target_version` containing a control character
+  before any write (the `.okf` sidecar is line-keyed; there is no encoder to
+  route through), and resolves every `plan.nodes[].path` before the first
+  write, so a bad plan entry leaves the bundle untouched.
 - `AppendLog` flattens the message at the first CommonMark line ending
   (`\n` or `\r`), not just `\n` (§9 date headings stay unforgeable).
 
@@ -123,14 +141,33 @@ out of scope for a local, single-user CLI.
 
 Extending `2026-08-08-fuzz-untrusted-parsers.md`: each target writes through the
 real writer, reads the result back through the real parser, and asserts the
-injection invariant. All are registered in the CI `fuzz` job.
+injection invariant. All four live in `internal/okf/writepath_fuzz_test.go`, are
+registered in the CI `fuzz` job at `-fuzztime=30s`, and assert that no
+`.<base>.tmp-*` file is left behind.
 
 | target | writer → parser | invariants |
 |---|---|---|
-| `FuzzNewNodeFrontmatter` | `NewNode(type, title)` → `ParseFrontmatter` | never panics; on success the frontmatter keys are exactly `type`, `created`, `modified` (+ `title` when non-blank)—no smuggled key |
-| `FuzzTouchModifiedRoundTrip` | `TouchModifiedFile` → `ParseFrontmatter` | never panics; on error the file is byte-identical (atomicity); on success `modified` is present, every pre-existing key survives (§4.1 preserve unknown keys), and the body is unchanged |
-| `FuzzRootIndexMarker` | `rootFrontmatter` (§12 marker) → `ParseFrontmatter` | the block holds exactly one key, `okf_version`; for valid UTF-8 its value round-trips exactly |
-| `FuzzAppendLog` | `AppendLog` → CommonMark line split | a fresh log has exactly one `## ` heading—today's (§9) |
+| `FuzzNewNodeFrontmatter` | `NewNode(type, title)` → `ParseFrontmatter` | never panics; the frontmatter parses and its keys are exactly `type`, `created`, `modified` (+ `title` when non-blank)—no smuggled key |
+| `FuzzTouchModifiedRoundTrip` | `TouchModifiedFile` → `ParseFrontmatter` | on error the file is byte-identical; on success `modified` is present, every pre-existing key survives (§4.1), at most one key is added, and the body after the block is byte-identical |
+| `FuzzRootIndexMarker` | `bumpRootIndexMarker` (§12 marker) → `ParseFrontmatter` | the root `index.md` keeps exactly its keys and its body; a control-character-free target that decodes as a string reads back exactly |
+| `FuzzAppendLog` | `AppendLog` → CommonMark line split (LF and CR) | one append adds exactly one `* ` entry and one `## ` heading (§9); a refused append leaves the log byte-identical |
+
+`FuzzAppendLog` is the positive control for the bare-CR fix: with `AppendLog`
+reverted to cutting at `\n` only, its seed corpus fails on `a\r## 2020-01-01`.
+
+### Tests
+
+| file | covers |
+|---|---|
+| `internal/fsutil/fsutil_test.go` | the helper contract: replace-by-rename, failure leaves the target, mode kept, write-through symlink; accepted and refused paths, symlink/junction escape, in-bundle link |
+| `internal/okf/writesafety_test.go` | touch, move and promote rewrites, migrate, index and log writes replace by rename (hard-link probe); a v0.1 node keeps its legacy provenance through a touch |
+| `internal/okf/writesafety_newnode_test.go` | `node new` through an escaping link; `a/b/c.md`, `/deep/x.md`, titles with `---` |
+| `internal/okf/writesafety_move_test.go` | `node mv` out of the root or with a line break refused, links untouched |
+| `internal/okf/writesafety_promote_test.go` | `--name` escape, multi-segment, reserved and control-character names |
+| `internal/okf/writesafety_migrate_test.go` | plan path escape and `target_version` injection refused before any write |
+| `internal/okf/writesafety_log_test.go` | bare-CR heading forgery |
+| `cmd/node_edit_confine_test.go` | `node edit ../x` refused before the editor runs |
+| `internal/okfconfig/save_atomic_test.go`, `internal/search/store_atomic_test.go`, `cmd/migrate_plan_atomic_test.go` | config, vector store and plan writes replace by rename |
 
 ## Controls
 

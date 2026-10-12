@@ -251,8 +251,26 @@ func migrateTimeString(v any) string {
 // version markers (.okf sidecar and bundle-root index.md). It never touches a
 // judgment item — those stay for the plan's consumer.
 func MigrateApply(root string, b *Bundle, plan MigratePlan) error {
-	for _, nm := range plan.Nodes {
-		abs := filepath.Join(root, filepath.FromSlash(nm.Path))
+	// The plan is a JSON file the user (or an agent) may have edited between
+	// phases, so nothing in it is trusted. Validate it whole before any write.
+	// §12: the .okf sidecar is line-keyed, so a line break in the target would
+	// write a second, forged key into it.
+	for _, r := range plan.TargetVersion {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("migrate plan target_version %q contains a control character", plan.TargetVersion)
+		}
+	}
+	// §3: every node the plan names must live inside the bundle root.
+	abss := make([]string, len(plan.Nodes))
+	for i, nm := range plan.Nodes {
+		abs, err := fsutil.ResolveInRoot(root, nm.Path)
+		if err != nil {
+			return fmt.Errorf("migrate plan node %s: %w", nm.Path, err)
+		}
+		abss[i] = abs
+	}
+	for i, nm := range plan.Nodes {
+		abs := abss[i]
 		raw, err := os.ReadFile(abs) //nolint:gosec // G304: reading a node from the user's own bundle
 		if err != nil {
 			return fmt.Errorf("read %s: %w", nm.Path, err)

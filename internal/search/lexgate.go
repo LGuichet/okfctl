@@ -16,105 +16,32 @@ package search
 
 import (
 	"sort"
-	"strings"
-	"unicode"
 
+	"github.com/cwest/okfctl/internal/lexical"
 	"github.com/cwest/okfctl/internal/okf"
 )
 
 // This file implements the term-wise lexical matcher behind --lexical-gate
 // (cwest/okfctl#66). It exists because the two search surfaces never meet: the
-// semantic query is embedding-only, and core `okfctl search --field body` is a
-// PHRASE-WISE, raw-substring match. Two reproduced failures on the real corpus
-// drive every choice here:
-//
-//   1. Phrase-wise body match on a question ("how should an agent decide when to
-//      delegate work") returns 0 hits — so the gate must reduce a query to its
-//      CONTENT TERMS (stopwords dropped) and match term-wise, never as a phrase.
-//   2. Raw-substring match is asymmetric: `hash` matches 18 nodes, `hashes` 0;
-//      `agent` 172, `agents` 100 — so the gate must NORMALIZE morphology (stem)
-//      so a term and its inflection collapse to one match set.
-//
-// okfctl is a spec consumer, not an NLP toolkit, so the transforms are the
-// lightest that fix the proven failures: a fixed English stopword set and a
-// suffix stripper, not a full Porter stemmer (whose aggressive rewrites would
-// over-collapse distinct identifiers).
+// semantic query is embedding-only, and core `okfctl search --field body` matches
+// the query as a PHRASE, by raw substring. The tokenizer, stopword set and light
+// stemmer it matches with live in internal/lexical—the one analysis chain shared
+// with core's BM25 ranking—so the gate, core search and hybrid fusion all agree
+// on what a "term" is. The thin forwarders below keep this package's existing
+// names (and their tests) unchanged.
 
-// stopwords is a small closed set of English function words plus the
-// question-shaped leaders proven necessary by the 0-hit reproduction. Content
-// words (nouns, verbs like "delegate", domain terms like "agent") are NOT here —
-// removing them would defeat the gate. Kept deliberately short: an over-broad
-// stopword list silently drops real query signal.
-var stopwords = map[string]bool{
-	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true,
-	"be": true, "but": true, "by": true, "can": true, "did": true, "do": true,
-	"does": true, "for": true, "from": true, "how": true, "i": true, "if": true,
-	"in": true, "into": true, "is": true, "it": true, "its": true, "me": true,
-	"my": true, "no": true, "not": true, "of": true, "on": true, "or": true,
-	"our": true, "should": true, "so": true, "than": true, "that": true,
-	"the": true, "their": true, "them": true, "then": true, "there": true,
-	"these": true, "they": true, "this": true, "to": true, "up": true,
-	"was": true, "we": true, "were": true, "what": true, "when": true,
-	"where": true, "which": true, "who": true, "why": true, "will": true,
-	"with": true, "would": true, "you": true, "your": true,
-}
+// stem forwards to lexical.Stem.
+func stem(tok string) string { return lexical.Stem(tok) }
 
-// minStemLen is the shortest a token may be REDUCED to by suffix stripping. A
-// suffix is only removed if at least this many runes remain, so short tokens
-// ("is", "os", "ci", "go") and short identifiers survive intact rather than
-// being mangled to a single letter.
-const minStemLen = 3
+// tokenize forwards to lexical.Tokenize.
+func tokenize(text string) []string { return lexical.Tokenize(text) }
 
-// stem applies a deliberately light suffix strip so a term and its common
-// inflections collapse to one form: it removes at most ONE of the ordered
-// suffixes {ing, ed, es, s, e} and only when the remaining stem is >= minStemLen
-// runes. Ordered longest-first so "hashes" -> "hash" (via es), not "hashe".
-// This is the fix for the hash/hashes and agent/agents asymmetry; it is NOT a
-// linguistic stemmer and makes no claim beyond collapsing those inflections.
-func stem(tok string) string {
-	// Order matters: try longer, more specific suffixes before shorter ones.
-	for _, suf := range []string{"ing", "ed", "es", "s", "e"} {
-		if len(tok) > len(suf) && strings.HasSuffix(tok, suf) {
-			if trimmed := tok[:len(tok)-len(suf)]; len([]rune(trimmed)) >= minStemLen {
-				return trimmed
-			}
-		}
-	}
-	return tok
-}
-
-// tokenize lowercases text and splits it into alphanumeric tokens, discarding
-// every non-alphanumeric rune as a boundary. This is the ONE tokenizer used for
-// both the query and node text, so the query side and the match side always
-// share a coordinate space.
-func tokenize(text string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	return fields
-}
-
-// LexTerms reduces a query string to its stemmed content terms: it tokenizes,
-// drops stopwords, stems each survivor, de-duplicates, and returns them sorted
-// for determinism. An empty slice means the query carries NO content signal (an
-// all-stopword query) — the gate reads that as "degrade to pure semantic".
-func LexTerms(query string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, tok := range tokenize(query) {
-		if stopwords[tok] {
-			continue
-		}
-		s := stem(tok)
-		if seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	sort.Strings(out)
-	return out
-}
+// LexTerms reduces a query string to its stemmed content terms (forwarding to
+// lexical.Terms): it tokenizes, drops stopwords, stems each survivor,
+// de-duplicates, and returns them sorted for determinism. An empty slice means
+// the query carries NO content signal (an all-stopword query)—the gate reads
+// that as "degrade to pure semantic".
+func LexTerms(query string) []string { return lexical.Terms(query) }
 
 // LexicalMatchSet returns the set of keys in texts whose text contains at least
 // one of terms, matched TERM-WISE on stemmed tokens (not raw substring). texts

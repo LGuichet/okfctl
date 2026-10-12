@@ -163,8 +163,8 @@ decision nobody reviewed.
   on the checkout that publishes—that breaks a post-merge `git pull --ff-only`.
 - **Apache headers read `Copyright <year> Google LLC`**—not Casey West. Match
   the existing files exactly.
-- **Commits are SSH-signed by their real author**, under that author's own name,
-  email, and key—never under someone else's identity. Conventional
+- **Commits carry their real author's name and email**—never someone else's
+  identity. Signing is not required. Conventional
   format, no AI attribution and no agent/teammate names in any commit message, PR
   title/body, issue, review comment, or code comment.
 - **No CGO, no Python, no ONNX.** Pure Go; `CGO_ENABLED=0` must build. (This
@@ -225,5 +225,5 @@ A change is done when all of the following hold—not when the code works:
 3. Real-corpus run executed, with before/after counts pinned in the PR body.
 4. Both controls proven for any detector change.
 5. Spec sections cited for any spec-mandated behavior.
-6. Commit signed by its real author, Conventional, team-invisible.
+6. Commit by its real author, Conventional, team-invisible.
 7. PR opened on the fork (`LGuichet/okfctl`), never upstream.

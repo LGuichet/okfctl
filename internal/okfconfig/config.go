@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // Path returns the config file location: $OKFCTL_CONFIG_HOME/config.json, else
@@ -66,5 +68,5 @@ func Save(m map[string]string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o600)
+	return fsutil.WriteFileAtomic(p, data, 0o600)
 }

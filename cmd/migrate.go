@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"github.com/cwest/okfctl/internal/okf"
 	"github.com/spf13/cobra"
 )
@@ -97,7 +98,7 @@ func runMigratePlan(cmd *cobra.Command, dir, planPath, generatedBy string) error
 		return fmt.Errorf("encode plan: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(planPath, data, 0o644); err != nil { //nolint:gosec // G306: migration plan is a shareable bundle artifact; 0o644 is intended
+	if err := fsutil.WriteFileAtomic(planPath, data, 0o644); err != nil { //nolint:gosec // G306: migration plan is a shareable bundle artifact; 0o644 is intended
 		return fmt.Errorf("write plan %s: %w", planPath, err)
 	}
 	out := cmd.OutOrStdout()

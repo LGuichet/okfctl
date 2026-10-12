@@ -1,0 +1,13 @@
+{
+  "bundle": "ifpos-interface-cases",
+  "queries": [
+    {"id": "ifpos-chargeitem", "query": "ftChargeItemCase", "kind": "exact-term", "relevant": ["chargeitem-case.md"]},
+    {"id": "ifpos-payitem", "query": "ftPayItemCase", "kind": "exact-term", "relevant": ["payitem-case.md"]},
+    {"id": "ifpos-journal", "query": "ftJournalType", "kind": "exact-term", "relevant": ["journal-type.md"]},
+    {"id": "ifpos-state", "query": "ftState", "kind": "exact-term", "relevant": ["state.md"]},
+    {"id": "ifpos-payment-method", "query": "how is the way the customer paid encoded", "kind": "paraphrase", "relevant": ["payitem-case.md"]},
+    {"id": "ifpos-operable", "query": "is the cash register currently able to operate", "kind": "paraphrase", "relevant": ["state.md"]},
+    {"id": "ifpos-receipt-kind", "query": "what kind of sales document is being issued", "kind": "paraphrase", "relevant": ["receipt-case.md"]},
+    {"id": "ifpos-article-tax", "query": "tax rate applied to a sold article", "kind": "paraphrase", "relevant": ["chargeitem-case.md"]}
+  ]
+}

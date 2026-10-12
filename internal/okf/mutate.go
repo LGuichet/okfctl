@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // LinkRewrite is a single planned edit to a node's body: replace the link
@@ -217,7 +219,7 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	}
 	for path, content := range edited {
 		abs := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}

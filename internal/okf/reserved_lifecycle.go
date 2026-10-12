@@ -23,6 +23,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // neighborhood returns the top-level directory of a bundle-relative slash path,
@@ -472,7 +474,7 @@ func WriteIndexWithOptions(b *Bundle, opts IndexShapeOptions) error {
 		if existing, err := os.ReadFile(p); err == nil && usesCRLF(existing) { //nolint:gosec // G304: reading the tool's own generated index file
 			out = strings.ReplaceAll(out, "\n", "\r\n")
 		}
-		if err := os.WriteFile(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
 			return err
 		}
 	}
@@ -591,12 +593,12 @@ func AppendLog(root, message string) error {
 	if err != nil {
 		// Create a fresh §9 log with the default title.
 		out := logHeader + "## " + today + "\n* " + message + "\n"
-		return os.WriteFile(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
+		return fsutil.WriteFileAtomic(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
 	}
 
 	lg := parseLog(string(existing))
 	lg.addEntry(today, message)
-	return os.WriteFile(p, []byte(lg.render()), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
+	return fsutil.WriteFileAtomic(p, []byte(lg.render()), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
 }
 
 // ReadLog returns the log.md body (empty string if the file is absent).

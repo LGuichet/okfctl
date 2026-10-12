@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // PromoteChange is a single planned promotion of one directory-as-concept
@@ -317,7 +319,7 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 	}
 	for p, content := range edited {
 		abs := filepath.Join(root, filepath.FromSlash(p))
-		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", p, err)
 		}
 	}
@@ -340,7 +342,7 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 		// frontmatter (created untouched) and the same verbatim body. Only its
 		// PATH changes; that alone flips it from an illegal directory index to a
 		// legal concept node.
-		if err := os.WriteFile(newAbs, raw, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(newAbs, raw, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", ch.NewPath, err)
 		}
 		if err := os.Remove(oldAbs); err != nil {

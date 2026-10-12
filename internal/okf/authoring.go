@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -134,7 +135,7 @@ func NewNodeFromTemplate(root, relPath, typ, title string, t Template) (string, 
 	}
 	// A bundle node is a shareable knowledge document (committed to git, read by
 	// others); 0o644 is the intended, conventional mode for content files.
-	if err := os.WriteFile(abs, []byte(sb.String()), 0o644); err != nil { //nolint:gosec // G306: shareable bundle content file
+	if err := fsutil.WriteFileAtomic(abs, []byte(sb.String()), 0o644); err != nil { //nolint:gosec // G306: shareable bundle content file
 		return "", err
 	}
 	return abs, nil

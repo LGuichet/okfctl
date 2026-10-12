@@ -103,7 +103,9 @@ func newConnectCmd() *cobra.Command {
 
 // looksLikeGitURL reports whether s is plausibly a git URL rather than a bare
 // (mistyped) remote name: a scheme (https://, git://, ssh://, file://), scp-like
-// syntax (user@host:path), or an absolute/relative path to a local repo.
+// syntax (user@host:path), or an absolute/relative path to a local repo,
+// including the Windows drive (C:\repos\kb, C:/repos/kb) and UNC
+// (\\server\share\kb) forms git accepts.
 func looksLikeGitURL(s string) bool {
 	if strings.Contains(s, "://") {
 		return true
@@ -114,6 +116,9 @@ func looksLikeGitURL(s string) bool {
 	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, ".") || strings.HasPrefix(s, "~") {
 		return true // local path (a local bare repo is a valid source)
 	}
+	if okf.HasWindowsPathPrefix(s) {
+		return true // Windows drive or UNC path
+	}
 	return false
 }
 
@@ -121,8 +126,11 @@ func looksLikeGitURL(s string) bool {
 // path segment, dropping a trailing .git — matching `git clone`'s own default.
 func defaultDirForURL(url string) string {
 	s := strings.TrimRight(url, "/")
-	// scp-like syntax: everything after the last ':' is the path.
-	if i := strings.LastIndex(s, ":"); i >= 0 && !strings.Contains(s, "://") {
+	// scp-like syntax: everything after the last ':' is the path. A Windows
+	// drive path's colon is not scp syntax.
+	if okf.HasWindowsPathPrefix(s) {
+		s = strings.ReplaceAll(s, `\`, "/")
+	} else if i := strings.LastIndex(s, ":"); i >= 0 && !strings.Contains(s, "://") {
 		s = s[i+1:]
 	}
 	s = strings.TrimRight(s, "/")

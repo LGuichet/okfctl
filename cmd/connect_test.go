@@ -148,3 +148,42 @@ func TestConnect_UnknownNameAndNoSlashErrors(t *testing.T) {
 		t.Fatalf("connect with an unknown bareword source must error")
 	}
 }
+
+func TestLooksLikeGitURL(t *testing.T) {
+	cases := map[string]bool{
+		"https://github.com/acme/kb.git": true,
+		"git@github.com:acme/kb.git":     true,
+		"file:///srv/kb.git":             true,
+		"/srv/kb.git":                    true,
+		"./kb":                           true,
+		"~/kb":                           true,
+		`C:\repos\docs`:                  true,
+		"C:/repos/docs":                  true,
+		`\\server\share\repo`:            true,
+		// Negative control: a bare word is a mistyped remote name, not a URL.
+		"knowledge": false,
+		"C:repos":   false,
+	}
+	for s, want := range cases {
+		if got := looksLikeGitURL(s); got != want {
+			t.Errorf("looksLikeGitURL(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+func TestDefaultDirForURL(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/acme/kb.git": "kb",
+		"git@github.com:acme/kb.git":     "kb",
+		"/srv/docs.git":                  "docs",
+		`C:\repos\docs`:                  "docs",
+		`C:\repos\docs\`:                 "docs",
+		"C:/repos/docs.git":              "docs",
+		`\\server\share\repo`:            "repo",
+	}
+	for in, want := range cases {
+		if got := defaultDirForURL(in); got != want {
+			t.Errorf("defaultDirForURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

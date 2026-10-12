@@ -77,3 +77,14 @@ func IsGitWorkTree(dir string) bool {
 	}
 	return strings.TrimSpace(string(out)) == "true"
 }
+
+// HasWindowsPathPrefix reports whether s starts like a Windows path git accepts
+// as a local source: a drive letter (`C:\repos\kb`, `C:/repos/kb`) or a UNC
+// share (`\\server\share\kb`).
+func HasWindowsPathPrefix(s string) bool {
+	if strings.HasPrefix(s, `\\`) {
+		return true
+	}
+	return len(s) >= 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/') &&
+		(('a' <= s[0] && s[0] <= 'z') || ('A' <= s[0] && s[0] <= 'Z'))
+}

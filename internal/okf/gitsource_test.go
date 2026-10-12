@@ -125,3 +125,23 @@ func TestIsGitWorkTree_FalseOutsideRepo(t *testing.T) {
 		t.Fatalf("IsGitWorkTree true for a non-repo dir")
 	}
 }
+
+func TestHasWindowsPathPrefix(t *testing.T) {
+	cases := map[string]bool{
+		`C:\repos\docs`:       true,
+		"c:/repos/docs":       true,
+		`\\server\share\repo`: true,
+		`\single\backslash`:   false,
+		"C:":                  false,
+		"C:repos":             false,
+		"knowledge":           false,
+		"/srv/kb":             false,
+		"git@host:kb":         false,
+		"1:/x":                false,
+	}
+	for s, want := range cases {
+		if got := HasWindowsPathPrefix(s); got != want {
+			t.Errorf("HasWindowsPathPrefix(%q) = %v, want %v", s, got, want)
+		}
+	}
+}

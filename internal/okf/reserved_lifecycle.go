@@ -576,12 +576,14 @@ func rel(root, abs string) string {
 //     group when the newest heading is today, else under a new `## <today>`
 //     heading inserted above the first heading.
 //
-// A multi-line message is flattened to its first line; an empty message is
-// rejected.
+// A multi-line message (LF, CR or CRLF) is flattened to its first line; an
+// empty message is rejected.
 func AppendLog(root, message string) error {
 	message = strings.TrimSpace(message)
-	if i := strings.IndexByte(message, '\n'); i >= 0 {
-		message = message[:i]
+	// CommonMark ends a line at LF, CR or CRLF, so cut at either: a bare CR
+	// would otherwise start a forged `## <date>` heading inside the §9 log.
+	if i := strings.IndexAny(message, "\r\n"); i >= 0 {
+		message = strings.TrimSpace(message[:i])
 	}
 	if message == "" {
 		return fmt.Errorf("log message must not be empty")

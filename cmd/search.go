@@ -39,6 +39,7 @@ func newSearchCmd() *cobra.Command {
 		depth     int
 		asJSON    bool
 		noIgnore  bool
+		sortBy    string
 	)
 
 	c := &cobra.Command{
@@ -47,7 +48,9 @@ func newSearchCmd() *cobra.Command {
 		Long: "search queries the bundle from the CLI without a model or index.\n\n" +
 			"Lexical mode (default): okfctl search \"query\" [dir] matches concept nodes by\n" +
 			"title, tag, type, or body substring (case-insensitive). Restrict the fields\n" +
-			"with --field title|tag|type|body.\n\n" +
+			"with --field title|tag|type|body. Matches are ranked by BM25F relevance\n" +
+			"(title > tags > type > body, ties broken by path); --sort path lists them\n" +
+			"in plain path order instead. --json adds each match's score.\n\n" +
 			"Graph-structural mode: okfctl search --neighbors <node-path> [dir] returns the\n" +
 			"nodes within --depth hops of a node in the link graph (edges are undirected).\n\n" +
 			"Semantic (vector) search is the separate okfctl-search plugin: run\n" +
@@ -83,10 +86,11 @@ func newSearchCmd() *cobra.Command {
 			if len(args) == 2 {
 				dir = args[1]
 			}
-			return runLexical(cmd, dir, query, field, asJSON, noIgnore)
+			return runLexical(cmd, dir, query, field, sortBy, asJSON, noIgnore)
 		},
 	}
 	c.Flags().StringVar(&field, "field", "any", "lexical match fields: any|title|tag|type|body")
+	c.Flags().StringVar(&sortBy, "sort", "score", "lexical result order: score (BM25F relevance, ties by path) or path")
 	c.Flags().StringVar(&neighbors, "neighbors", "", "graph mode: node path to traverse from")
 	c.Flags().IntVar(&depth, "depth", 1, "neighborhood traversal depth (hops)")
 	c.Flags().BoolVar(&asJSON, "json", false, "emit results as JSON")
@@ -94,16 +98,29 @@ func newSearchCmd() *cobra.Command {
 	return c
 }
 
-func runLexical(cmd *cobra.Command, dir, query, field string, asJSON, noIgnore bool) error {
+func runLexical(cmd *cobra.Command, dir, query, field, sortBy string, asJSON, noIgnore bool) error {
 	sf, ok := validFields[strings.ToLower(field)]
 	if !ok {
 		return fmt.Errorf("unknown --field %q (want any, title, tag, type, or body)", field)
+	}
+	var byScore bool
+	switch strings.ToLower(sortBy) {
+	case "score":
+		byScore = true
+	case "path":
+	default:
+		return fmt.Errorf("unknown --sort %q (want score or path)", sortBy)
 	}
 	b, err := loadBundleForCmd(cmd, dir, noIgnore)
 	if err != nil {
 		return err
 	}
+	// okf.Search returns the substring match set in path order with each
+	// node's BM25F score filled in; the default reorders it by relevance.
 	results := okf.Search(b, query, sf)
+	if byScore {
+		okf.RankResults(results)
+	}
 	if asJSON {
 		return writeJSON(cmd, results)
 	}

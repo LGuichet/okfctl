@@ -1,9 +1,22 @@
-# AGENTS.md—how work flows in this repo (`cwest/okfctl`)
+# AGENTS.md—how work flows in this repo (`LGuichet/okfctl`, a fork of `cwest/okfctl`)
 
 This file is the operating contract for any agent (or human) making changes to
 this repo. It is auto-injected as project context whenever a session or job runs
 with this directory as its working directory. Read it before you touch anything
 here.
+
+## This is a fork—work stays here
+
+Upstream (`cwest/okfctl`, the `origin` remote) requires every commit to be signed
+as its maintainer, so it does not take outside contributions. Work on this fork
+lands on the fork only:
+
+- **Never open a PR, issue, or review against `cwest/okfctl`.** PRs target
+  `LGuichet/okfctl` (the `fork` remote).
+- **Never push to `origin`.** Treat it as read-only: `git fetch origin` to pick
+  up upstream changes, then merge them into the fork's `next`/`main`.
+- Everything else in this file still applies—the spec, the gate, and the house
+  style are unchanged.
 
 ## The one fact that governs everything
 
@@ -150,7 +163,8 @@ decision nobody reviewed.
   on the checkout that publishes—that breaks a post-merge `git pull --ff-only`.
 - **Apache headers read `Copyright <year> Google LLC`**—not Casey West. Match
   the existing files exactly.
-- **Commits are SSH-signed** as `Casey West <casey@geeknest.com>`, Conventional
+- **Commits are SSH-signed by their real author**, under that author's own name,
+  email, and key—never under someone else's identity. Conventional
   format, no AI attribution and no agent/teammate names in any commit message, PR
   title/body, issue, review comment, or code comment.
 - **No CGO, no Python, no ONNX.** Pure Go; `CGO_ENABLED=0` must build. (This
@@ -211,4 +225,5 @@ A change is done when all of the following hold—not when the code works:
 3. Real-corpus run executed, with before/after counts pinned in the PR body.
 4. Both controls proven for any detector change.
 5. Spec sections cited for any spec-mandated behavior.
-6. Commit signed, Conventional, team-invisible.
+6. Commit signed by its real author, Conventional, team-invisible.
+7. PR opened on the fork (`LGuichet/okfctl`), never upstream.

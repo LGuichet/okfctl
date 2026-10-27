@@ -133,7 +133,19 @@ func runMigrateApply(cmd *cobra.Command, dir, planPath string, dry bool) error {
 		return fmt.Errorf("load bundle: %w", err)
 	}
 	out := cmd.OutOrStdout()
+	// A plan from before per-node hashes (or one edited by hand) still applies,
+	// but nothing can tell whether its nodes changed since phase 1; say so.
+	if unhashed := okf.UnhashedMigrateNodes(plan); len(unhashed) > 0 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %d plan node(s) carry no sha256, so edits made since phase 1 cannot be detected for them; re-run phase 1 to add the check.\n",
+			len(unhashed))
+	}
+	// The dry run makes every check the real apply makes before its first
+	// write, so a drifted plan fails here too rather than previewing edits
+	// that would be refused.
 	if dry {
+		if err := okf.CheckMigratePlan(dir, plan); err != nil {
+			return err
+		}
 		for _, nm := range plan.Nodes {
 			if nm.Generated != nil {
 				fmt.Fprintf(out, "would rewrite %s: timestamp -> generated { by: %s, at: %s }\n",

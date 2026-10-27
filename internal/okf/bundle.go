@@ -22,6 +22,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // ReservedFiles are the reserved base names that are not concept nodes. A file
@@ -168,11 +170,11 @@ func Load(root string, opts ...LoadOption) (*Bundle, error) {
 		if ferr != nil {
 			// Preserve the node with nil frontmatter so validate can report it.
 			// A malformed block was physically present, so record that.
-			n := &Node{Path: rel, Frontmatter: nil, Body: string(src), HasFrontmatterBlock: true}
+			n := &Node{Path: rel, Frontmatter: nil, Body: string(src), HasFrontmatterBlock: true, SHA256: fsutil.SHA256Hex(src)}
 			b.place(rel, n)
 			return nil
 		}
-		n := &Node{Path: rel, Frontmatter: fm, Body: body, HasFrontmatterBlock: present}
+		n := &Node{Path: rel, Frontmatter: fm, Body: body, HasFrontmatterBlock: present, SHA256: fsutil.SHA256Hex(src)}
 		b.place(rel, n)
 		return nil
 	})

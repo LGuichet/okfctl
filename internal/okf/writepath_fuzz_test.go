@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // The fuzz targets below drive the WRITE paths, where frontmatter_fuzz_test.go
@@ -184,8 +186,12 @@ func FuzzRootIndexMarker(f *testing.F) {
 		if err := os.WriteFile(p, []byte(src), 0o644); err != nil { //nolint:gosec // G306: test fixture
 			t.Fatal(err)
 		}
-		if err := bumpRootIndexMarker(root, version); err != nil {
-			t.Fatalf("bumpRootIndexMarker(%q): %v", version, err)
+		var tx fsutil.Tx
+		if err := stageRootIndexMarker(&tx, root, version); err != nil {
+			t.Fatalf("stageRootIndexMarker(%q): %v", version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit marker %q: %v", version, err)
 		}
 		got, err := os.ReadFile(p) //nolint:gosec // G304: test-owned temp file
 		if err != nil {

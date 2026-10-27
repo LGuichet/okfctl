@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,18 +50,11 @@ func NewNodeFromTemplate(root, relPath, typ, title string, t Template) (string, 
 	if !strings.HasSuffix(relPath, ".md") {
 		relPath += ".md"
 	}
-	abs := filepath.Join(root, filepath.FromSlash(relPath))
-	rootAbs, err := filepath.Abs(root)
+	// §3: the bundle is its directory tree, so the node must land inside it—
+	// lexically and through any symlinked or junctioned directory on the way.
+	abs, err := fsutil.ResolveInRoot(root, relPath)
 	if err != nil {
-		return "", err
-	}
-	absAbs, err := filepath.Abs(abs)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(rootAbs, absAbs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("node path escapes the bundle root: %s", relPath)
+		return "", fmt.Errorf("node path %s: %w", relPath, err)
 	}
 	if _, err := os.Stat(abs); err == nil {
 		return "", fmt.Errorf("node already exists: %s", relPath)
@@ -134,7 +128,7 @@ func NewNodeFromTemplate(root, relPath, typ, title string, t Template) (string, 
 	}
 	// A bundle node is a shareable knowledge document (committed to git, read by
 	// others); 0o644 is the intended, conventional mode for content files.
-	if err := os.WriteFile(abs, []byte(sb.String()), 0o644); err != nil { //nolint:gosec // G306: shareable bundle content file
+	if err := fsutil.WriteFileAtomic(abs, []byte(sb.String()), 0o644); err != nil { //nolint:gosec // G306: shareable bundle content file
 		return "", err
 	}
 	return abs, nil

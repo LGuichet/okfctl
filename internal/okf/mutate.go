@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // LinkRewrite is a single planned edit to a node's body: replace the link
@@ -174,8 +176,18 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	if IsReservedPath(old) || IsReservedPath(new) {
 		return fmt.Errorf("cannot move reserved file (%s -> %s)", old, new)
 	}
-	oldAbs := filepath.Join(root, filepath.FromSlash(old))
-	newAbs := filepath.Join(root, filepath.FromSlash(new))
+	// §3: both ends of the move stay inside the bundle root. Checked before
+	// any rewrite so a refused move leaves every inbound link untouched; the
+	// control-character refusal also keeps a line break out of the rewritten
+	// link text.
+	oldAbs, err := fsutil.ResolveInRoot(root, old)
+	if err != nil {
+		return fmt.Errorf("move source %s: %w", old, err)
+	}
+	newAbs, err := fsutil.ResolveInRoot(root, new)
+	if err != nil {
+		return fmt.Errorf("move destination %s: %w", new, err)
+	}
 	if _, err := os.Stat(newAbs); err == nil {
 		return fmt.Errorf("destination already exists: %s", new)
 	} else if !os.IsNotExist(err) {
@@ -188,6 +200,16 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	// the full file keeps offsets and content in the same coordinate space.
 	// (A frontmatter block contains no node-resolving markdown link, so
 	// scanning the whole file cannot introduce a spurious match.)
+	// §3: a rewritten node is written too, so confine it like the move ends—a
+	// node that is a symlink out of the bundle must not be written through.
+	absOf := map[string]string{}
+	for _, rw := range rewrites {
+		abs, err := fsutil.ResolveInRoot(root, rw.NodePath)
+		if err != nil {
+			return fmt.Errorf("move rewrite %s: %w", rw.NodePath, err)
+		}
+		absOf[rw.NodePath] = abs
+	}
 	edited := map[string]string{}
 	for _, rw := range rewrites {
 		if b.Nodes[rw.NodePath] == nil {
@@ -195,7 +217,7 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 		}
 		content, ok := edited[rw.NodePath]
 		if !ok {
-			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rw.NodePath))) //nolint:gosec // G304: reading a node from the user's own bundle
+			raw, err := os.ReadFile(absOf[rw.NodePath]) //nolint:gosec // G304: reading a node from the user's own bundle
 			if err != nil {
 				return fmt.Errorf("read %s: %w", rw.NodePath, err)
 			}
@@ -216,8 +238,7 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 		edited[rw.NodePath] = content
 	}
 	for path, content := range edited {
-		abs := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(absOf[path], []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}

@@ -1,0 +1,5 @@
+# Normalize line endings: every text file is stored and checked out as LF,
+# whatever core.autocrlf says locally. gofmt, the command-reference drift
+# test and index check all compare against LF content, so a CRLF checkout
+# (Windows default) made every file look dirty.
+* text=auto eol=lf

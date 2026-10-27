@@ -48,9 +48,10 @@ func newSearchCmd() *cobra.Command {
 		Long: "search queries the bundle from the CLI without a model or index.\n\n" +
 			"Lexical mode (default): okfctl search \"query\" [dir] matches concept nodes by\n" +
 			"title, tag, type, or body substring (case-insensitive). Restrict the fields\n" +
-			"with --field title|tag|type|body. Matches are ranked by BM25F relevance\n" +
-			"(title > tags > type > body, ties broken by path); --sort path lists them\n" +
-			"in plain path order instead. --json adds each match's score.\n\n" +
+			"with --field title|tag|type|body. Matches are ranked by BM25F relevance,\n" +
+			"weighting a hit in the title over tags, type, then body (ties broken by\n" +
+			"path); --sort path lists them in plain path order instead. --json adds\n" +
+			"each match's score.\n\n" +
 			"Graph-structural mode: okfctl search --neighbors <node-path> [dir] returns the\n" +
 			"nodes within --depth hops of a node in the link graph (edges are undirected).\n\n" +
 			"Semantic (vector) search is the separate okfctl-search plugin: run\n" +

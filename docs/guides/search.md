@@ -14,13 +14,16 @@ index, so it's always available.
   `--field title|tag|type|body` (default `any`). Reserved files (`index.md`/`log.md`) are
   never results. A zero-result query is not an error. Add `--json` for a
   deterministic, CI-diffable array.
-- Matches are **ranked by BM25F relevance** (title > tags > type > body, ties
-  broken by path), computed in memory on each run—no index file. Query and node
+- Matches are **ranked by BM25F relevance**, computed in memory on each run—no
+  index file. A hit in the title weighs more than one in the tags, type, then
+  body, but repeated body mentions still add up, so for a common term a
+  body-heavy node can rank level with a title hit; ties break by path. Query and node
   text share the `--lexical-gate` analysis chain (stopwords dropped, light
   stemming), so a stopword-only query ranks nothing and comes back in path
   order, and a node that matches only by substring (`ci` inside `decision`)
   scores 0 and sorts last. `--sort path` restores plain path order; `--json`
-  adds each match's `score`.
+  adds each match's `score`, rounded to 6 decimals so it is identical on every
+  platform.
 - `okfctl search --neighbors <node-path> [dir]` is a graph-structural query: the
   concept nodes within `--depth` hops (default 1) of a node in the link graph.
   Edges are treated as **undirected**, so a reader's traversal is symmetric.

@@ -195,3 +195,38 @@ func TestRank_StemmedInflectionsMatch(t *testing.T) {
 		t.Fatalf("hash must reach hashes: %v", got)
 	}
 }
+
+// Scores are rounded to ScoreDecimals so --json and the score-then-path order
+// are identical on every platform (FMA fusion changes raw low bits).
+func TestScores_RoundedToFixedPrecision(t *testing.T) {
+	docs := []Document{
+		{Path: "a.md", Title: "signature chain", Body: filler(37) + "signature"},
+		{Path: "b.md", Body: filler(11) + "signature signature"},
+		{Path: "c.md", Tags: []string{"signature"}, Body: filler(53)},
+	}
+	scores := NewIndex(docs, DefaultWeights).Scores("signature chain")
+	if len(scores) != 3 {
+		t.Fatalf("scores = %v, want 3 hits", scores)
+	}
+	for p, s := range scores {
+		if s != math.Round(s*1e6)/1e6 {
+			t.Errorf("%s score %v carries more than %d decimals", p, s, ScoreDecimals)
+		}
+	}
+	// Negative control: rounding keeps distinct scores distinct and the
+	// title hit first.
+	got := paths(Rank(docs, "signature chain", DefaultWeights))
+	if got[0] != "a.md" || scores["b.md"] == scores["c.md"] {
+		t.Fatalf("rounding changed the ranking: %v %v", got, scores)
+	}
+}
+
+func TestRoundScore(t *testing.T) {
+	for in, want := range map[float64]float64{
+		0.4971234449: 0.497123, 0.4971235551: 0.497124, 0: 0, 3.5: 3.5,
+	} {
+		if got := RoundScore(in); got != want {
+			t.Errorf("RoundScore(%v) = %v, want %v", in, got, want)
+		}
+	}
+}

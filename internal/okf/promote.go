@@ -304,6 +304,15 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 			}
 			absOf[p] = abs
 		}
+		// PromotePlan only checks loaded nodes; the disk is the authority. A
+		// file already there (a non-node, or on a case-insensitive filesystem
+		// the index.md being promoted, --name Index) refuses the promotion here,
+		// before step 1 rewrites any inbound link.
+		if _, err := os.Lstat(absOf[ch.NewPath]); err == nil {
+			return fmt.Errorf("cannot promote %s: destination %s already exists", ch.OldPath, ch.NewPath)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %w", ch.NewPath, err)
+		}
 	}
 	// 1) Apply link rewrites to the FULL on-disk file content, so the YAML
 	//    frontmatter block is preserved by construction and the scanner's byte
@@ -350,11 +359,6 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 		raw, err := os.ReadFile(oldAbs) //nolint:gosec // G304: reading a node from the user's own bundle
 		if err != nil {
 			return fmt.Errorf("read %s: %w", ch.OldPath, err)
-		}
-		if _, err := os.Stat(newAbs); err == nil {
-			return fmt.Errorf("destination already exists: %s", ch.NewPath)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat %s: %w", ch.NewPath, err)
 		}
 		// The promoted file is byte-identical to the old index — same
 		// frontmatter (created untouched) and the same verbatim body. Only its

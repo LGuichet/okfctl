@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.26.9' }
+        with: { go-version: '1.26.10' }
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - name: vet
@@ -65,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.26.9' }
+        with: { go-version: '1.26.10' }
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -84,13 +84,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.26.9' }
+        with: { go-version: '1.26.10' }
       - name: fuzz untrusted-input parsers (negative control — normal input passes)
         run: |
           set -euo pipefail
           go test ./internal/okf/       -run '^$' -fuzz '^FuzzParseFrontmatter$'   -fuzztime=30s
           go test ./internal/okf/       -run '^$' -fuzz '^FuzzSplitFrontmatterRaw$' -fuzztime=30s
           go test ./internal/okf/       -run '^$' -fuzz '^FuzzLoadBundle$'          -fuzztime=30s
+          go test ./internal/okf/       -run '^$' -fuzz '^FuzzNewNodeFrontmatter$'    -fuzztime=30s
+          go test ./internal/okf/       -run '^$' -fuzz '^FuzzTouchModifiedRoundTrip$' -fuzztime=30s
+          go test ./internal/okf/       -run '^$' -fuzz '^FuzzRootIndexMarker$'       -fuzztime=30s
+          go test ./internal/okf/       -run '^$' -fuzz '^FuzzAppendLog$'             -fuzztime=30s
           go test ./internal/apiserver/ -run '^$' -fuzz '^FuzzSearchQueryParams$'   -fuzztime=30s
           go test ./internal/apiserver/ -run '^$' -fuzz '^FuzzCanonicalizeQuery$'   -fuzztime=30s
       - name: positive control — a guaranteed crasher MUST fail the fuzz gate
@@ -255,7 +259,7 @@ jobs:
           echo "negative control rejected as required — the schema gate catches malformed manifests"
       - name: set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: { go-version: '1.26.9' }
+        with: { go-version: '1.26.10' }
       - name: leak gate + offline validator on the packaged artifact
         # The Go suite validates the manifest offline AND runs the leak gate over
         # the packaged skill payload (declared skills resolve to shareable, no

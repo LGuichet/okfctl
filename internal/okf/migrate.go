@@ -16,6 +16,7 @@ package okf
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -92,6 +94,10 @@ type NodeMigration struct {
 	Path      string         `json:"path"`
 	Generated *GeneratedEdit `json:"generated,omitempty"`
 	Sources   []SourceEdit   `json:"sources,omitempty"`
+	// SHA256 is the hex SHA-256 of the node file the plan was computed from.
+	// --apply refuses the whole plan when the file no longer matches it. A
+	// plan written before this field existed has none, and applies unchecked.
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // MigratePlan is the full, JSON-serializable migration plan: the deterministic
@@ -126,7 +132,7 @@ func PlanMigration(b *Bundle, generatedBy string) (MigratePlan, error) {
 		if n.Frontmatter == nil {
 			continue // unparseable frontmatter is a different failure class
 		}
-		nm := NodeMigration{Path: rel}
+		nm := NodeMigration{Path: rel, SHA256: n.SHA256}
 
 		// §13.1: timestamp -> generated { by, at }. Only when generated is not
 		// already present (idempotence) and a legacy timestamp exists.
@@ -246,28 +252,95 @@ func migrateTimeString(v any) string {
 
 // MigrateApply applies a plan's deterministic edits to disk, order-preserving
 // and additive-only. root is the bundle root; b is the loaded bundle the plan
-// was computed against. It writes each edited node in place, then bumps the
-// version markers (.okf sidecar and bundle-root index.md). It never touches a
-// judgment item — those stay for the plan's consumer.
+// was computed against. It renders every edited node and the version markers
+// (.okf sidecar and bundle-root index.md) first, then writes them as one
+// transaction: a node whose bytes no longer match the plan's sha256 refuses the
+// whole plan before any write, and a failure part-way restores every file
+// already written. It never touches a judgment item — those stay for the
+// plan's consumer.
 func MigrateApply(root string, b *Bundle, plan MigratePlan) error {
+	tx, err := stageMigration(root, plan)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		if errors.Is(err, fsutil.ErrChanged) {
+			return fmt.Errorf("migrate: %w; nothing was written (re-run phase 1 to plan against the current files)", err)
+		}
+		return fmt.Errorf("migrate: %w", err)
+	}
+	return nil
+}
+
+// CheckMigratePlan reports, without writing, whether plan still applies to the
+// bundle at root: every check MigrateApply makes before its first write. A
+// --dry-run runs it so a preview fails exactly where the real apply would.
+func CheckMigratePlan(root string, plan MigratePlan) error {
+	_, err := stageMigration(root, plan)
+	return err
+}
+
+// UnhashedMigrateNodes returns the plan nodes that carry no sha256 (a plan
+// written before the field existed, or edited by hand), which --apply cannot
+// check for drift.
+func UnhashedMigrateNodes(plan MigratePlan) []string {
+	var out []string
 	for _, nm := range plan.Nodes {
-		abs := filepath.Join(root, filepath.FromSlash(nm.Path))
+		if nm.SHA256 == "" {
+			out = append(out, nm.Path)
+		}
+	}
+	return out
+}
+
+// stageMigration validates plan against the files at root and renders every
+// write into a transaction, writing nothing.
+func stageMigration(root string, plan MigratePlan) (*fsutil.Tx, error) {
+	// The plan is a JSON file the user (or an agent) may have edited between
+	// phases, so nothing in it is trusted. Validate it whole before any write.
+	// §12: the .okf sidecar is line-keyed, so a line break in the target would
+	// write a second, forged key into it.
+	for _, r := range plan.TargetVersion {
+		if r < 0x20 || r == 0x7f {
+			return nil, fmt.Errorf("migrate plan target_version %q contains a control character", plan.TargetVersion)
+		}
+	}
+	// §3: every node the plan names must live inside the bundle root.
+	abss := make([]string, len(plan.Nodes))
+	for i, nm := range plan.Nodes {
+		abs, err := fsutil.ResolveInRoot(root, nm.Path)
+		if err != nil {
+			return nil, fmt.Errorf("migrate plan node %s: %w", nm.Path, err)
+		}
+		abss[i] = abs
+	}
+	tx := &fsutil.Tx{}
+	for i, nm := range plan.Nodes {
+		abs := abss[i]
 		raw, err := os.ReadFile(abs) //nolint:gosec // G304: reading a node from the user's own bundle
 		if err != nil {
-			return fmt.Errorf("read %s: %w", nm.Path, err)
+			return nil, fmt.Errorf("read %s: %w", nm.Path, err)
+		}
+		// The plan's edits were computed from the file it hashed; applied to
+		// any other bytes they could drop or duplicate what changed since.
+		if nm.SHA256 != "" && fsutil.SHA256Hex(raw) != nm.SHA256 {
+			return nil, fmt.Errorf("migrate plan node %s: %w; nothing was written (re-run phase 1 to plan against the current files)", nm.Path, fsutil.ErrChanged)
 		}
 		out, err := renderMigratedNode(raw, nm)
 		if err != nil {
-			return fmt.Errorf("migrate %s: %w", nm.Path, err)
+			return nil, fmt.Errorf("migrate %s: %w", nm.Path, err)
 		}
 		if bytes.Equal(out, raw) {
 			continue
 		}
-		if err := os.WriteFile(abs, out, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
-			return fmt.Errorf("write %s: %w", nm.Path, err)
-		}
+		// Expect the bytes just read, so an edit between this read and the
+		// commit is refused too.
+		tx.Write(abs, out, 0o644, fsutil.SHA256Hex(raw)) //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 	}
-	return bumpVersionMarkers(root, plan.TargetVersion)
+	if err := stageVersionMarkers(tx, root, plan.TargetVersion); err != nil {
+		return nil, err
+	}
+	return tx, nil
 }
 
 // renderMigratedNode returns the node file bytes with the planned deterministic
@@ -456,20 +529,20 @@ func citationResource(item string) (string, bool) {
 	return "", false
 }
 
-// bumpVersionMarkers sets the bundle's declared version to target in both the
-// .okf sidecar (§12) and the bundle-root index.md okf_version marker (§8/§12 —
-// the only place index frontmatter is permitted). Each is a no-op when already
-// at target (idempotence) or absent.
-func bumpVersionMarkers(root, target string) error {
-	if err := bumpOkfSidecar(root, target); err != nil {
+// stageVersionMarkers stages setting the bundle's declared version to target
+// in both the .okf sidecar (§12) and the bundle-root index.md okf_version
+// marker (§8/§12 — the only place index frontmatter is permitted). Each is a
+// no-op when already at target (idempotence) or absent.
+func stageVersionMarkers(tx *fsutil.Tx, root, target string) error {
+	if err := stageOkfSidecar(tx, root, target); err != nil {
 		return err
 	}
-	return bumpRootIndexMarker(root, target)
+	return stageRootIndexMarker(tx, root, target)
 }
 
-// bumpOkfSidecar rewrites the okf_version line of the .okf sidecar to target,
-// preserving every other line. Absent sidecar is a no-op.
-func bumpOkfSidecar(root, target string) error {
+// stageOkfSidecar stages rewriting the okf_version line of the .okf sidecar to
+// target, preserving every other line. Absent sidecar is a no-op.
+func stageOkfSidecar(tx *fsutil.Tx, root, target string) error {
 	abs := filepath.Join(root, ".okf")
 	data, err := os.ReadFile(abs) //nolint:gosec // G304: reading the user's own bundle .okf sidecar
 	if err != nil {
@@ -493,13 +566,14 @@ func bumpOkfSidecar(root, target string) error {
 	if !changed {
 		return nil
 	}
-	return os.WriteFile(abs, []byte(strings.Join(lines, "\n")), 0o644) //nolint:gosec // G306: the .okf sidecar is a shareable bundle artifact; 0o644 is intended
+	tx.Write(abs, []byte(strings.Join(lines, "\n")), 0o644, fsutil.SHA256Hex(data)) //nolint:gosec // G306: the .okf sidecar is a shareable bundle artifact; 0o644 is intended
+	return nil
 }
 
-// bumpRootIndexMarker rewrites the bundle-root index.md okf_version marker to
-// target, order-preserving and body-verbatim. Absent index or absent marker is
-// a no-op — this never invents a marker where the author had none.
-func bumpRootIndexMarker(root, target string) error {
+// stageRootIndexMarker stages rewriting the bundle-root index.md okf_version
+// marker to target, order-preserving and body-verbatim. Absent index or absent
+// marker is a no-op — this never invents a marker where the author had none.
+func stageRootIndexMarker(tx *fsutil.Tx, root, target string) error {
 	abs := filepath.Join(root, "index.md")
 	raw, err := os.ReadFile(abs) //nolint:gosec // G304: reading the user's own bundle index.md
 	if err != nil {
@@ -542,7 +616,8 @@ func bumpRootIndexMarker(root, target string) error {
 	if bytes.Equal(out.Bytes(), raw) {
 		return nil
 	}
-	return os.WriteFile(abs, out.Bytes(), 0o644) //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+	tx.Write(abs, out.Bytes(), 0o644, fsutil.SHA256Hex(raw)) //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+	return nil
 }
 
 // findScalar returns the scalar value of key in a mapping, or "".

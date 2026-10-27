@@ -29,6 +29,10 @@ type Node struct {
 	// empty block (`---\n---`); this bit is the only way to tell them apart,
 	// which §8/§12 validation needs (a present empty block is a violation).
 	HasFrontmatterBlock bool
+	// SHA256 is the hex SHA-256 of the file bytes as loaded ("" for a node
+	// built in memory). A writer that edits the file later checks it first, so
+	// an edit made after the load is refused instead of overwritten.
+	SHA256 string
 }
 
 // Type returns the node's type value ("" if absent or not a string).

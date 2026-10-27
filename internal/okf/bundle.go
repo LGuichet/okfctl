@@ -22,6 +22,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // ReservedFiles are the reserved base names that are not concept nodes. A file
@@ -33,9 +35,11 @@ import (
 var ReservedFiles = map[string]bool{"index.md": true, "log.md": true}
 
 // IsReservedPath reports whether a bundle-relative slash path names a reserved
-// file (index.md or log.md) at any depth.
+// file (index.md or log.md) at any depth. The path is cleaned with the native
+// separator first, the way a write resolves it, so a user-typed `sub\index.md`
+// on Windows is recognized as the reserved file it lands on.
 func IsReservedPath(rel string) bool {
-	return ReservedFiles[path.Base(rel)]
+	return ReservedFiles[path.Base(filepath.ToSlash(filepath.Clean(rel)))]
 }
 
 // DefaultSkipDirs is the base-name skip list applied to the bundle walk. These
@@ -166,11 +170,11 @@ func Load(root string, opts ...LoadOption) (*Bundle, error) {
 		if ferr != nil {
 			// Preserve the node with nil frontmatter so validate can report it.
 			// A malformed block was physically present, so record that.
-			n := &Node{Path: rel, Frontmatter: nil, Body: string(src), HasFrontmatterBlock: true}
+			n := &Node{Path: rel, Frontmatter: nil, Body: string(src), HasFrontmatterBlock: true, SHA256: fsutil.SHA256Hex(src)}
 			b.place(rel, n)
 			return nil
 		}
-		n := &Node{Path: rel, Frontmatter: fm, Body: body, HasFrontmatterBlock: present}
+		n := &Node{Path: rel, Frontmatter: fm, Body: body, HasFrontmatterBlock: present, SHA256: fsutil.SHA256Hex(src)}
 		b.place(rel, n)
 		return nil
 	})

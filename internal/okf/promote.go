@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // PromoteChange is a single planned promotion of one directory-as-concept
@@ -71,6 +73,9 @@ func PromotableIndexes(b *Bundle) []string {
 // A destination that already exists as a concept node is a hard error — promote
 // never overwrites authored content.
 func PromotePlan(b *Bundle, basename string) ([]PromoteChange, error) {
+	if err := checkPromoteName(basename); err != nil {
+		return nil, err
+	}
 	indexes := PromotableIndexes(b)
 
 	// Compute each promotion's destination and validate up front.
@@ -284,6 +289,31 @@ func newConceptIsRootRel(url, targetDir string) bool {
 // by WriteIndex at the command layer). root is the bundle root; b is the loaded
 // bundle the plan was computed against. It is the single writer for a promotion.
 func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
+	// 0) §3: confine every path the plan names to the bundle root before any
+	//    write, so a refused change leaves the bundle exactly as it was.
+	absOf := map[string]string{}
+	for _, ch := range changes {
+		paths := []string{ch.OldPath, ch.NewPath}
+		for _, rw := range ch.Rewrites {
+			paths = append(paths, rw.NodePath)
+		}
+		for _, p := range paths {
+			abs, err := fsutil.ResolveInRoot(root, p)
+			if err != nil {
+				return fmt.Errorf("promote %s: %w", p, err)
+			}
+			absOf[p] = abs
+		}
+		// PromotePlan only checks loaded nodes; the disk is the authority. A
+		// file already there (a non-node, or on a case-insensitive filesystem
+		// the index.md being promoted, --name Index) refuses the promotion here,
+		// before step 1 rewrites any inbound link.
+		if _, err := os.Lstat(absOf[ch.NewPath]); err == nil {
+			return fmt.Errorf("cannot promote %s: destination %s already exists", ch.OldPath, ch.NewPath)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %w", ch.NewPath, err)
+		}
+	}
 	// 1) Apply link rewrites to the FULL on-disk file content, so the YAML
 	//    frontmatter block is preserved by construction and the scanner's byte
 	//    offsets and content stay in the same coordinate space.
@@ -292,7 +322,7 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 		for _, rw := range ch.Rewrites {
 			content, ok := edited[rw.NodePath]
 			if !ok {
-				raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rw.NodePath))) //nolint:gosec // G304: reading a node from the user's own bundle
+				raw, err := os.ReadFile(absOf[rw.NodePath]) //nolint:gosec // G304: reading a node from the user's own bundle
 				if err != nil {
 					return fmt.Errorf("read %s: %w", rw.NodePath, err)
 				}
@@ -316,8 +346,7 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 		}
 	}
 	for p, content := range edited {
-		abs := filepath.Join(root, filepath.FromSlash(p))
-		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(absOf[p], []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", p, err)
 		}
 	}
@@ -325,22 +354,17 @@ func PromoteApply(root string, b *Bundle, changes []PromoteChange) error {
 	// 2) Move each directory-concept index into its new concept file (body
 	//    verbatim, created immutable), then remove the old index.md.
 	for _, ch := range changes {
-		oldAbs := filepath.Join(root, filepath.FromSlash(ch.OldPath))
-		newAbs := filepath.Join(root, filepath.FromSlash(ch.NewPath))
+		oldAbs := absOf[ch.OldPath]
+		newAbs := absOf[ch.NewPath]
 		raw, err := os.ReadFile(oldAbs) //nolint:gosec // G304: reading a node from the user's own bundle
 		if err != nil {
 			return fmt.Errorf("read %s: %w", ch.OldPath, err)
-		}
-		if _, err := os.Stat(newAbs); err == nil {
-			return fmt.Errorf("destination already exists: %s", ch.NewPath)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat %s: %w", ch.NewPath, err)
 		}
 		// The promoted file is byte-identical to the old index — same
 		// frontmatter (created untouched) and the same verbatim body. Only its
 		// PATH changes; that alone flips it from an illegal directory index to a
 		// legal concept node.
-		if err := os.WriteFile(newAbs, raw, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(newAbs, raw, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", ch.NewPath, err)
 		}
 		if err := os.Remove(oldAbs); err != nil {
@@ -360,4 +384,28 @@ func indexOfLink(content, rawTarget string) int {
 		return i + len("](")
 	}
 	return -1
+}
+
+// checkPromoteName refuses a --name that is not a single, ordinary path
+// segment. The promoted concept is written to <dir>/<name>.md, so a separator
+// or ".." would move it into another directory or out of the bundle (§3), a
+// reserved base name would overwrite a §3.1 index.md or log.md, and a control
+// character would land raw in every rewritten inbound link. "" means "use the
+// directory's own base name" and is always accepted.
+func checkPromoteName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("promote --name %q must be a single file name, not a path", name)
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("promote --name %q contains a control character", name)
+		}
+	}
+	if IsReservedPath(name + ".md") {
+		return fmt.Errorf("promote --name %q would create a reserved file (§3.1)", name)
+	}
+	return nil
 }

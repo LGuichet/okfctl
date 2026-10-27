@@ -15,11 +15,14 @@
 package okf
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cwest/okfctl/internal/fsutil"
 )
 
 // LinkRewrite is a single planned edit to a node's body: replace the link
@@ -174,12 +177,35 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	if IsReservedPath(old) || IsReservedPath(new) {
 		return fmt.Errorf("cannot move reserved file (%s -> %s)", old, new)
 	}
-	oldAbs := filepath.Join(root, filepath.FromSlash(old))
-	newAbs := filepath.Join(root, filepath.FromSlash(new))
+	// §3: both ends of the move stay inside the bundle root. Checked before
+	// any rewrite so a refused move leaves every inbound link untouched; the
+	// control-character refusal also keeps a line break out of the rewritten
+	// link text.
+	oldAbs, err := fsutil.ResolveInRoot(root, old)
+	if err != nil {
+		return fmt.Errorf("move source %s: %w", old, err)
+	}
+	newAbs, err := fsutil.ResolveInRoot(root, new)
+	if err != nil {
+		return fmt.Errorf("move destination %s: %w", new, err)
+	}
 	if _, err := os.Stat(newAbs); err == nil {
 		return fmt.Errorf("destination already exists: %s", new)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat %s: %w", new, err)
+	}
+	// The plan was computed from b, so b's bytes are what every write below
+	// assumes. Each file is checked against the hash recorded at load before
+	// anything is written: an edit made since the load refuses the whole move
+	// rather than being overwritten or half-rewritten.
+	hashOf := func(p string) string {
+		if n := b.Nodes[p]; n != nil {
+			return n.SHA256
+		}
+		return ""
+	}
+	if err := checkLoaded(oldAbs, old, hashOf(old)); err != nil {
+		return err
 	}
 
 	// Apply link rewrites to the FULL on-disk file content (not the parsed
@@ -188,6 +214,16 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	// the full file keeps offsets and content in the same coordinate space.
 	// (A frontmatter block contains no node-resolving markdown link, so
 	// scanning the whole file cannot introduce a spurious match.)
+	// §3: a rewritten node is written too, so confine it like the move ends—a
+	// node that is a symlink out of the bundle must not be written through.
+	absOf := map[string]string{}
+	for _, rw := range rewrites {
+		abs, err := fsutil.ResolveInRoot(root, rw.NodePath)
+		if err != nil {
+			return fmt.Errorf("move rewrite %s: %w", rw.NodePath, err)
+		}
+		absOf[rw.NodePath] = abs
+	}
 	edited := map[string]string{}
 	for _, rw := range rewrites {
 		if b.Nodes[rw.NodePath] == nil {
@@ -195,9 +231,12 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 		}
 		content, ok := edited[rw.NodePath]
 		if !ok {
-			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rw.NodePath))) //nolint:gosec // G304: reading a node from the user's own bundle
+			raw, err := os.ReadFile(absOf[rw.NodePath]) //nolint:gosec // G304: reading a node from the user's own bundle
 			if err != nil {
 				return fmt.Errorf("read %s: %w", rw.NodePath, err)
+			}
+			if h := hashOf(rw.NodePath); h != "" && fsutil.SHA256Hex(raw) != h {
+				return changedSinceLoad(rw.NodePath)
 			}
 			content = string(raw)
 		}
@@ -215,21 +254,46 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 		}
 		edited[rw.NodePath] = content
 	}
-	for path, content := range edited {
-		abs := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
-			return fmt.Errorf("write %s: %w", path, err)
+	// One transaction: every rewrite and the move land together, or a failure
+	// part-way restores the rewritten files and leaves the node where it was.
+	var tx fsutil.Tx
+	paths := make([]string, 0, len(edited))
+	for path := range edited {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		tx.Write(absOf[path], []byte(edited[path]), 0o644, hashOf(path)) //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+	}
+	tx.Rename(oldAbs, newAbs, hashOf(old))
+	if err := tx.Commit(); err != nil {
+		if errors.Is(err, fsutil.ErrChanged) {
+			return fmt.Errorf("move %s -> %s: %w (re-run to plan against the current files)", old, new, err)
 		}
-	}
-
-	// Bundle directories hold shareable knowledge documents; 0o755 is intended.
-	if err := os.MkdirAll(filepath.Dir(newAbs), 0o755); err != nil { //nolint:gosec // G301: shareable bundle content dir
-		return fmt.Errorf("mkdir for %s: %w", new, err)
-	}
-	if err := os.Rename(oldAbs, newAbs); err != nil {
 		return fmt.Errorf("move %s -> %s: %w", old, new, err)
 	}
 	return nil
+}
+
+// checkLoaded refuses a write to rel when its bytes on disk no longer hash to
+// want, the hash recorded when the bundle was loaded. An empty want (a node
+// built in memory) skips the check.
+func checkLoaded(abs, rel, want string) error {
+	if want == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(abs) //nolint:gosec // G304: reading a node from the user's own bundle
+	if err != nil {
+		return fmt.Errorf("read %s: %w", rel, err)
+	}
+	if fsutil.SHA256Hex(raw) != want {
+		return changedSinceLoad(rel)
+	}
+	return nil
+}
+
+func changedSinceLoad(rel string) error {
+	return fmt.Errorf("%s: %w; nothing was written (re-run to plan against the current files)", rel, fsutil.ErrChanged)
 }
 
 // PlanRemoveOrphans returns the bundle-relative nodes that become orphaned

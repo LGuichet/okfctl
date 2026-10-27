@@ -200,6 +200,16 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 	// the full file keeps offsets and content in the same coordinate space.
 	// (A frontmatter block contains no node-resolving markdown link, so
 	// scanning the whole file cannot introduce a spurious match.)
+	// §3: a rewritten node is written too, so confine it like the move ends—a
+	// node that is a symlink out of the bundle must not be written through.
+	absOf := map[string]string{}
+	for _, rw := range rewrites {
+		abs, err := fsutil.ResolveInRoot(root, rw.NodePath)
+		if err != nil {
+			return fmt.Errorf("move rewrite %s: %w", rw.NodePath, err)
+		}
+		absOf[rw.NodePath] = abs
+	}
 	edited := map[string]string{}
 	for _, rw := range rewrites {
 		if b.Nodes[rw.NodePath] == nil {
@@ -207,7 +217,7 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 		}
 		content, ok := edited[rw.NodePath]
 		if !ok {
-			raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rw.NodePath))) //nolint:gosec // G304: reading a node from the user's own bundle
+			raw, err := os.ReadFile(absOf[rw.NodePath]) //nolint:gosec // G304: reading a node from the user's own bundle
 			if err != nil {
 				return fmt.Errorf("read %s: %w", rw.NodePath, err)
 			}
@@ -228,8 +238,7 @@ func ApplyMove(root string, b *Bundle, old, new string, rewrites []LinkRewrite) 
 		edited[rw.NodePath] = content
 	}
 	for path, content := range edited {
-		abs := filepath.Join(root, filepath.FromSlash(path))
-		if err := fsutil.WriteFileAtomic(abs, []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(absOf[path], []byte(content), 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}

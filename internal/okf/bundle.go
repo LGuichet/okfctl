@@ -33,9 +33,11 @@ import (
 var ReservedFiles = map[string]bool{"index.md": true, "log.md": true}
 
 // IsReservedPath reports whether a bundle-relative slash path names a reserved
-// file (index.md or log.md) at any depth.
+// file (index.md or log.md) at any depth. The path is cleaned with the native
+// separator first, the way a write resolves it, so a user-typed `sub\index.md`
+// on Windows is recognized as the reserved file it lands on.
 func IsReservedPath(rel string) bool {
-	return ReservedFiles[path.Base(rel)]
+	return ReservedFiles[path.Base(filepath.ToSlash(filepath.Clean(rel)))]
 }
 
 // DefaultSkipDirs is the base-name skip list applied to the bundle walk. These

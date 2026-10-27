@@ -191,7 +191,26 @@ func (ix *Index) Scores(query string) map[string]float64 {
 			out[d.path] += idf * tfw * (K1 + 1) / (K1 + tfw)
 		}
 	}
+	for p, s := range out {
+		out[p] = RoundScore(s)
+	}
 	return out
+}
+
+// ScoreDecimals is how many decimal places every score is rounded to. Go lets a
+// compiler fuse a multiply-add (arm64, ppc64, s390x do), so the low bits of a
+// raw float64 score differ by platform; rounding keeps --json output and the
+// score-then-path order identical on every machine.
+const ScoreDecimals = 6
+
+// scoreScale is 10^ScoreDecimals, exact in float64.
+const scoreScale = 1e6
+
+// RoundScore rounds s to ScoreDecimals places. Dividing the rounded integer by
+// the exact scale is one correctly rounded operation, so the result is the
+// float64 nearest the decimal and encodes as that short decimal in JSON.
+func RoundScore(s float64) float64 {
+	return math.Round(s*scoreScale) / scoreScale
 }
 
 // Rank returns every document with a positive score for query, ordered by score

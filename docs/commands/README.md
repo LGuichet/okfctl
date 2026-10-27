@@ -917,9 +917,10 @@ search queries the bundle from the CLI without a model or index.
 
 Lexical mode (default): okfctl search "query" [dir] matches concept nodes by
 title, tag, type, or body substring (case-insensitive). Restrict the fields
-with --field title|tag|type|body. Matches are ranked by BM25F relevance
-(title > tags > type > body, ties broken by path); --sort path lists them
-in plain path order instead. --json adds each match's score.
+with --field title|tag|type|body. Matches are ranked by BM25F relevance,
+weighting a hit in the title over tags, type, then body (ties broken by
+path); --sort path lists them in plain path order instead. --json adds
+each match's score.
 
 Graph-structural mode: okfctl search --neighbors <node-path> [dir] returns the
 nodes within --depth hops of a node in the link graph (edges are undirected).

@@ -60,6 +60,12 @@ func TouchModifiedFile(abs string, at time.Time) error {
 		return fsutil.WriteFileAtomic(abs, out.Bytes(), 0o644) //nolint:gosec // G306: shareable bundle content file
 	}
 
+	// Decoding into a yaml.Node accepts what the frontmatter parser rejects
+	// (a duplicate key), so check with the parser validate uses: a block it
+	// cannot read is refused, not re-encoded with a stamp added.
+	if _, _, err := ParseFrontmatter(raw); err != nil {
+		return fmt.Errorf("parse frontmatter of %s: %w", abs, err)
+	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(yamlBlock, &doc); err != nil {
 		return fmt.Errorf("parse frontmatter of %s: %w", abs, err)

@@ -22,6 +22,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"github.com/cwest/okfctl/internal/okf"
 )
 
@@ -191,7 +192,7 @@ func (s *Store) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644) //nolint:gosec // G306: the search index is a tool-managed cache file; 0o644 is intended
+	return fsutil.WriteFileAtomic(path, append(data, '\n'), 0o644) //nolint:gosec // G306: the search index is a tool-managed cache file; 0o644 is intended
 }
 
 // Load reads a store from path.

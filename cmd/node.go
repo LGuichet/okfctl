@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"github.com/cwest/okfctl/internal/okf"
 	"github.com/spf13/cobra"
 )
@@ -271,7 +272,11 @@ func newNodeCmd() *cobra.Command {
 			if okf.IsReservedPath(p) {
 				return fmt.Errorf("cannot edit reserved file: %s", p)
 			}
-			abs := filepath.Join(editBundle, filepath.FromSlash(p))
+			// §3: never hand the editor a file outside the bundle root.
+			abs, err := fsutil.ResolveInRoot(editBundle, p)
+			if err != nil {
+				return fmt.Errorf("node edit %s: %w", p, err)
+			}
 			if _, err := os.Stat(abs); err != nil {
 				return fmt.Errorf("node not found: %s", p)
 			}

@@ -254,10 +254,10 @@ func TestWriteIndex_CuratorSuffixIdempotentOnCRLF(t *testing.T) {
 	rendered := readFileStr(t, rootP)
 
 	// Insert a curator description into the audit bullet: turn
-	//   * [Audit](audit/) (N concept · ...)
+	//   * [Audit](audit/index.md) (N concept · ...)
 	// into
-	//   * [Audit](audit/) - Audit trail rules. (N concept · ...)
-	const linkMarker = "](audit/)"
+	//   * [Audit](audit/index.md) - Audit trail rules. (N concept · ...)
+	const linkMarker = "](audit/index.md)"
 	i := strings.Index(rendered, linkMarker)
 	if i < 0 {
 		t.Fatalf("expected an audit subdirectory bullet in the root index; got:\n%s", rendered)

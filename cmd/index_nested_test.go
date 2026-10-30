@@ -50,8 +50,8 @@ func TestIndexBuild_EmitsNestedDirRelativeIndexes(t *testing.T) {
 
 	// Root index: child dirs linked dir-relatively, no nested concept.
 	root := readFileStr(t, filepath.Join(dir, "index.md"))
-	if !strings.Contains(root, "](wine/)") || !strings.Contains(root, "](lifting/)") {
-		t.Errorf("root index must link child dirs as `wine/`/`lifting/`; got:\n%s", root)
+	if !strings.Contains(root, "](wine/index.md)") || !strings.Contains(root, "](lifting/index.md)") {
+		t.Errorf("root index must link child dirs as `wine/index.md`/`lifting/index.md`; got:\n%s", root)
 	}
 	if strings.Contains(root, "wine/tannin.md") {
 		t.Errorf("root index must not enumerate nested concepts bundle-relatively; got:\n%s", root)
@@ -65,8 +65,8 @@ func TestIndexBuild_EmitsNestedDirRelativeIndexes(t *testing.T) {
 	if !strings.Contains(wine, "](tannin.md)") {
 		t.Errorf("wine/index.md must link its concept dir-relatively as `tannin.md`; got:\n%s", wine)
 	}
-	if !strings.Contains(wine, "](red/)") {
-		t.Errorf("wine/index.md must link its child dir as `red/`; got:\n%s", wine)
+	if !strings.Contains(wine, "](red/index.md)") {
+		t.Errorf("wine/index.md must link its child dir as `red/index.md`; got:\n%s", wine)
 	}
 	if strings.Contains(wine, "nebbiolo.md") {
 		t.Errorf("wine/index.md must enumerate ONLY its own directory, not the grandchild; got:\n%s", wine)

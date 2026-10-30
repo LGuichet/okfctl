@@ -117,9 +117,10 @@ func TestRenderDirIndex_DirRelativeConceptLinks(t *testing.T) {
 	}
 }
 
-// TestRenderDirIndex_SubdirectoryEntries pins §8's `* [Subdirectory](subdir/)`
-// form: an index enumerates its immediate content-bearing child directories with
-// a trailing-slash dir-relative link, and does NOT reach into grandchildren.
+// TestRenderDirIndex_SubdirectoryEntries pins the §8 Subdirectories entry: an
+// index enumerates its immediate content-bearing child directories with a
+// dir-relative link to the child's own index.md, and does NOT reach into
+// grandchildren.
 func TestRenderDirIndex_SubdirectoryEntries(t *testing.T) {
 	dir := t.TempDir()
 	_ = Scaffold(dir)
@@ -132,8 +133,8 @@ func TestRenderDirIndex_SubdirectoryEntries(t *testing.T) {
 	}
 	got := RenderDirIndex(b, "wine")
 
-	if !strings.Contains(got, "](red/)") {
-		t.Errorf("§6: child directory must be linked as `red/` (trailing slash, dir-relative); got:\n%s", got)
+	if !strings.Contains(got, "](red/index.md)") {
+		t.Errorf("§6: child directory must be linked as `red/index.md` (dir-relative); got:\n%s", got)
 	}
 	// It lists its own concept (tannin.md) but NOT the grandchild concept.
 	if !strings.Contains(got, "tannin.md") {
@@ -160,8 +161,8 @@ func TestRenderDirIndex_RootLinksToChildDirsAndOwnConcepts(t *testing.T) {
 	}
 	got := RenderDirIndex(b, "")
 
-	if !strings.Contains(got, "](wine/)") || !strings.Contains(got, "](lifting/)") {
-		t.Errorf("root index must link child dirs as `wine/` and `lifting/`; got:\n%s", got)
+	if !strings.Contains(got, "](wine/index.md)") || !strings.Contains(got, "](lifting/index.md)") {
+		t.Errorf("root index must link child dirs as `wine/index.md` and `lifting/index.md`; got:\n%s", got)
 	}
 	if !strings.Contains(got, "* [Top](top.md) - A root concept.") {
 		t.Errorf("root index must list its own root-level concept dir-relatively; got:\n%s", got)

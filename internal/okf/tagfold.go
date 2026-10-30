@@ -79,7 +79,7 @@ func tagPluralCandidates(w string) []string {
 	case strings.HasSuffix(w, "es"):
 		j := n - 3 // the letter before "es"
 		var out []string
-		if j > 0 && !(w[j] == 's' && w[j-1] == 's') {
+		if j > 0 && (w[j] != 's' || w[j-1] != 's') {
 			out = append(out, w[:n-1])
 		}
 		return append(out, w[:n-2])

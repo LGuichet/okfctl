@@ -99,6 +99,46 @@ func TestTouchModifiedFileAddsMissingModified(t *testing.T) {
 	}
 }
 
+// A null key written as an empty explicit key (`? `) must stay null across a
+// refresh. yaml.v3 re-encodes that empty plain scalar as an empty quoted STRING
+// key, which a parser then reads as a key the node never had (the
+// FuzzTouchModifiedRoundTrip failure `touch added keys: [] -> [ modified]`,
+// where the blank is the empty key). The negative
+// control: a key that really is the empty string keeps its quotes.
+func TestTouchModifiedFileKeepsEmptyNullKeyNull(t *testing.T) {
+	at := time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name, src string
+		wantKeys  int // keys a parser sees after the touch
+	}{
+		{"null key stays null", "---\n? \n---\n", 1},
+		{"nested null key stays null", "---\na:\n  ? \n---\n", 2},
+		{"empty string key stays a key", "---\n'': x\n---\n", 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			abs := filepath.Join(t.TempDir(), "n.md")
+			if err := os.WriteFile(abs, []byte(c.src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := TouchModifiedFile(abs, at); err != nil {
+				t.Fatalf("TouchModifiedFile: %v", err)
+			}
+			got := readAll(t, abs)
+			fm, _, err := ParseFrontmatter([]byte(got))
+			if err != nil {
+				t.Fatalf("touched frontmatter does not parse: %v\n%q", err, got)
+			}
+			if len(fm) != c.wantKeys {
+				t.Fatalf("got %d keys %q, want %d:\n%q", len(fm), sortedKeys(fm), c.wantKeys, got)
+			}
+			if c.name == "nested null key stays null" && strings.Contains(got, "''") {
+				t.Fatalf("nested null key re-encoded as an empty string:\n%q", got)
+			}
+		})
+	}
+}
+
 // The separator blank line between the frontmatter fence and the body must
 // survive a refresh byte-for-byte. The corpus writes `---\n\n# Heading`; a
 // refresh that collapses that to `---\n# Heading` is a prose change the drift

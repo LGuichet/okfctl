@@ -8,6 +8,14 @@ concepts or subdirectories, enumerating only that directory's own contents with
 index carries frontmatter (the §12 `okf_version` marker); every nested index
 carries none.
 
+A subdirectory entry links to the child's own index file, as in
+`* [Wine](wine/index.md) - description`, not to the bare directory, so a reader that can only open files
+(an agent's read tool, a plain Markdown viewer) can follow it. §8 leaves the
+relative URL open; its `subdir/` example is one spelling, not a rule. An index
+written by an older build with `wine/` links reads as stale under `index check`
+until the next `index build`, which rewrites the links and keeps every
+hand-written subdirectory description.
+
 - `okfctl index build [dir]` regenerates the reserved `index.md` files from the
   current bundle. Orphaned indexes left in a now-empty directory are pruned.
 - `okfctl index check [dir]` verifies every directory's `index.md` is current;

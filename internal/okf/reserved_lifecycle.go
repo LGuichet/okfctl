@@ -506,15 +506,23 @@ func WriteIndexWithOptions(b *Bundle, opts IndexShapeOptions) error {
 			return err
 		}
 		rendered := RenderDirIndexWithOptions(b, dir, opts)
-		// Preserve on write (issue #185): the render is produced LF, but if the
-		// index.md already on disk is dominantly CRLF (a Windows checkout), write
-		// the render back in CRLF so an up-to-date index stays byte-identical and
-		// git sees no whole-file line-ending churn. A new file, or one with mixed
-		// endings, is written LF. The choice depends only on this one file, so it
-		// is deterministic on any machine and leaves LF/Linux behavior unchanged.
 		out := rendered
-		if existing, rerr := os.ReadFile(p); rerr == nil && usesCRLF(string(existing)) { //nolint:gosec // G304: reading the tool's own generated index file
-			out = strings.ReplaceAll(rendered, "\n", "\r\n")
+		if existing, rerr := os.ReadFile(p); rerr == nil { //nolint:gosec // G304: reading the tool's own generated index file
+			// Already current (line endings are not content, as in IndexInSync):
+			// leave the file alone. Rewriting it would only change its line
+			// endings, which on a CRLF checkout makes git report it modified.
+			if normalizeEOL(string(existing)) == rendered {
+				continue
+			}
+			// Preserve on write (issue #185): the render is produced LF, but if the
+			// index.md already on disk is dominantly CRLF (a Windows checkout), write
+			// the render back in CRLF so git sees no whole-file line-ending churn. A
+			// new file, or one with mixed endings, is written LF. The choice depends
+			// only on this one file, so it is deterministic on any machine and leaves
+			// LF/Linux behavior unchanged.
+			if usesCRLF(string(existing)) {
+				out = strings.ReplaceAll(rendered, "\n", "\r\n")
+			}
 		}
 		if err := fsutil.WriteFileAtomic(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
 			return err

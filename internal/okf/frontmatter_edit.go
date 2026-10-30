@@ -69,6 +69,7 @@ func TouchModifiedFile(abs string, at time.Time) error {
 		return fmt.Errorf("frontmatter of %s is not a mapping", abs)
 	}
 	setScalar(root, "modified", stamp)
+	keepEmptyNullKeysNull(root)
 
 	var fmBuf bytes.Buffer
 	enc := yaml.NewEncoder(&fmBuf)
@@ -102,6 +103,26 @@ func frontmatterMapping(doc *yaml.Node) *yaml.Node {
 		return nil
 	}
 	return doc
+}
+
+// keepEmptyNullKeysNull rewrites every mapping key that is an empty plain null
+// (an explicit `? ` key) as `~`, recursively. yaml.v3 encodes that empty plain
+// scalar as an empty quoted STRING, so a refresh would otherwise invent a key
+// the node never had. `~` is the same null, spelled so it survives the encoder.
+// A key that is already a quoted empty string is real data and is left alone.
+func keepEmptyNullKeysNull(n *yaml.Node) {
+	for _, c := range n.Content {
+		keepEmptyNullKeysNull(c)
+	}
+	if n.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		if k.Kind == yaml.ScalarNode && k.Value == "" && k.Style == 0 && k.ShortTag() == "!!null" {
+			k.Value = "~"
+		}
+	}
 }
 
 // setScalar updates the scalar value of key in a mapping node in place,

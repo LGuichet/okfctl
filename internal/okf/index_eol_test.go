@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // toCRLF rewrites a file with CRLF endings, as a Windows checkout with
@@ -120,6 +121,7 @@ func TestWriteIndex_PreservesExistingLineEndings(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeNode(t, dir, "wine/acidity.md", "Reference", "Acidity") // forces a real wine/ change
+	writeNode(t, dir, "beer/malt.md", "Reference", "Malt")       // and a real beer/ change
 	writeNode(t, dir, "cider/apple.md", "Reference", "Apple")    // a brand-new index
 
 	b := buildAndReload(t, dir)
@@ -138,6 +140,58 @@ func TestWriteIndex_PreservesExistingLineEndings(t *testing.T) {
 		if got := readFile(t, p); strings.Contains(got, "\r") {
 			t.Errorf("%s: new or mixed-ending index must be written LF; got %q", p, got)
 		}
+	}
+}
+
+// index build leaves an index whose content is already current untouched,
+// whatever its line endings: same bytes, same mtime. A CRLF checkout whose
+// index went LF or mixed (an editor or an older tool rewrote it) is otherwise
+// rewritten on every build, and git, which recorded the CRLF size, reports it
+// modified with an empty diff. The control: an index whose content did change
+// is still rewritten.
+func TestWriteIndex_UnchangedIndexIsNotRewritten(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
+	writeNode(t, dir, "beer/hops.md", "Reference", "Hops")
+	writeNode(t, dir, "cider/apple.md", "Reference", "Apple")
+	_ = buildAndReload(t, dir)
+
+	crlf := filepath.Join(dir, "wine", "index.md")
+	mixed := filepath.Join(dir, "beer", "index.md")
+	lf := filepath.Join(dir, "cider", "index.md")
+	toCRLF(t, crlf)
+	if err := os.WriteFile(mixed, []byte(strings.Replace(readFile(t, mixed), "\n", "\r\n", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	before := map[string]string{}
+	for _, p := range []string{crlf, mixed, lf} {
+		before[p] = readFile(t, p)
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeNode(t, dir, "perry/pear.md", "Reference", "Pear") // changes the root index only
+
+	b := buildAndReload(t, dir)
+	if ok, diff := IndexInSync(b); !ok {
+		t.Fatalf("index must be in sync right after build; got: %s", diff)
+	}
+	for p, want := range before {
+		if got := readFile(t, p); got != want {
+			t.Errorf("%s: unchanged index must keep its bytes;\nwas %q\nnow %q", p, want, got)
+		}
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !fi.ModTime().Equal(old) {
+			t.Errorf("%s: unchanged index must not be rewritten (mtime moved)", p)
+		}
+	}
+	if got := readFile(t, filepath.Join(dir, "index.md")); !strings.Contains(got, "perry/index.md") {
+		t.Errorf("a changed root index must still be rewritten; got %q", got)
 	}
 }
 

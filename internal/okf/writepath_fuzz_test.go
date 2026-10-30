@@ -113,6 +113,7 @@ func FuzzTouchModifiedRoundTrip(f *testing.F) {
 		"---\r\ntype: Reference\r\n---\r\n\r\nCRLF body\r\n",
 		"---\ntitle: |\n  line\n  ---\n  injected: true\n---\n",
 		"---\n- a list\n---\n",
+		"---\n? \n---\n", // an empty null key: re-encoded as '' it became a new key
 		"",
 	}
 	for _, s := range seeds {

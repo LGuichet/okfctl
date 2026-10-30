@@ -69,7 +69,7 @@ func ResolveInRoot(root, rel string) (string, error) {
 	if filepath.VolumeName(native) != "" {
 		return "", fmt.Errorf("%w: %s", ErrEscapesRoot, rel)
 	}
-	native = strings.TrimLeft(native, string(filepath.Separator)+"/")
+	native = strings.TrimLeftFunc(native, func(r rune) bool { return r == '/' || r == filepath.Separator })
 	clean := filepath.Clean(native)
 	if clean == "." || native == "" {
 		return "", fmt.Errorf("%w: %q names the bundle root", ErrInvalidPath, rel)
@@ -103,7 +103,7 @@ func ResolveInRoot(root, rel string) (string, error) {
 	}
 	realExisting, err := filepath.EvalSymlinks(existing)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s (%v)", ErrEscapesRoot, rel, err)
+		return "", fmt.Errorf("%w: %s (%w)", ErrEscapesRoot, rel, err)
 	}
 	if !within(realRoot, realExisting) {
 		return "", fmt.Errorf("%w: %s resolves through a symlink to %s", ErrEscapesRoot, rel, realExisting)
@@ -122,7 +122,7 @@ func ResolveInRoot(root, rel string) (string, error) {
 			cur = filepath.Join(cur, part)
 			fi, err := os.Lstat(cur)
 			if err != nil {
-				return "", fmt.Errorf("%w: %s (%v)", ErrEscapesRoot, rel, err)
+				return "", fmt.Errorf("%w: %s (%w)", ErrEscapesRoot, rel, err)
 			}
 			if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0 {
 				continue

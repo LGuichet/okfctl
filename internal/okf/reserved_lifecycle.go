@@ -258,11 +258,14 @@ func subdirEntry(title, url, desc, shape string) string {
 }
 
 // subdirBulletRE matches one §8 Subdirectories bullet, capturing the link
-// target (group 2) and the trailing text after `](url)` (group 3). The trailing
+// target's directory part (group 2, e.g. "topics/") and the trailing text after
+// `](url)` (group 3). Both spellings §8 permits are accepted—the current
+// `topics/index.md` and the legacy `topics/` older builds wrote—and both key on
+// the same "topics/", so a curator description survives the switch. The trailing
 // text holds an optional ` - description` and/or the tool-owned shape suffix; we
 // separate those deterministically in preservedSubdirDescriptions rather than
 // with a greedy regex, so a description that itself ends in `(…)` survives.
-var subdirBulletRE = regexp.MustCompile(`^\* \[([^\]]*)\]\(([^)]+/)\)(.*)$`)
+var subdirBulletRE = regexp.MustCompile(`^\* \[([^\]]*)\]\(([^)]+/)(?:index\.md)?\)(.*)$`)
 
 // toolShapeSuffixRE matches a tool-owned shape suffix at the END of a bullet's
 // trailing text, STRUCTURALLY (not by equality against a freshly recomputed
@@ -355,7 +358,7 @@ func preservedSubdirDescriptions(b *Bundle, dir string, opts IndexShapeOptions) 
 // RenderDirIndex produces the deterministic index.md body for one directory of
 // the bundle (dir is bundle-relative slash form; "" is the bundle root), per OKF
 // §8: it enumerates ONLY that directory's own immediate contents — its
-// content-bearing child directories (linked dir-relatively as `child/`) under a
+// content-bearing child directories (linked dir-relatively as `child/index.md`) under a
 // "Subdirectories" section, and the concept nodes living directly in it (linked
 // by base name) under a "Concepts" section, each carrying the linked concept's
 // description from frontmatter. Links are relative to dir itself, never
@@ -408,11 +411,14 @@ func RenderDirIndexWithOptions(b *Bundle, dir string, opts IndexShapeOptions) st
 			if pd, ok := preserved[linkTarget]; ok {
 				desc = pd
 			}
-			// Dir-relative link: the child's base name plus a trailing slash.
+			// Dir-relative link to the child's own index file, not the bare
+			// directory: §8 leaves the relative URL open, and a file target
+			// resolves for a reader that can only open files (an agent's read
+			// tool, a plain Markdown viewer), matching the reference producer.
 			// The shape suffix trails the §8 `[Title](url) - description`
 			// grammar on the SAME bullet, so a consumer reading only that
 			// grammar loses nothing.
-			sb.WriteString(subdirEntry(title, linkTarget, desc, dirShape(b, child, opts)))
+			sb.WriteString(subdirEntry(title, linkTarget+"index.md", desc, dirShape(b, child, opts)))
 		}
 	}
 	if len(concepts) > 0 {

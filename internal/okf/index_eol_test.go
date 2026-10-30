@@ -151,7 +151,7 @@ func TestWriteIndex_CRLFKeepsSubdirDescriptionIdempotent(t *testing.T) {
 	_ = buildAndReload(t, dir)
 
 	root := filepath.Join(dir, "index.md")
-	withDesc := strings.Replace(readFile(t, root), "](wine/)", "](wine/) - Grapes and more.", 1)
+	withDesc := strings.Replace(readFile(t, root), "](wine/index.md)", "](wine/index.md) - Grapes and more.", 1)
 	if err := os.WriteFile(root, []byte(withDesc), 0o644); err != nil {
 		t.Fatal(err)
 	}

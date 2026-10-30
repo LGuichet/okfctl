@@ -544,6 +544,17 @@ func bumpRootIndexMarker(root, target string) error {
 		return nil // no marker to bump, or already at target (idempotent no-op)
 	}
 	setScalar(m, "okf_version", target)
+	// A target with a control character (the plan is user-editable) is written
+	// double-quoted, where every such character is escaped. Left to yaml.v3, a
+	// tab and a newline become a literal block whose tab-led line no parser
+	// reads back.
+	if strings.ContainsFunc(target, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == "okf_version" {
+				m.Content[i+1].Style = yaml.DoubleQuotedStyle
+			}
+		}
+	}
 
 	var fmBuf bytes.Buffer
 	enc := yaml.NewEncoder(&fmBuf)

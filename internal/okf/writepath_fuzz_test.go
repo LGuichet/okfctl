@@ -175,7 +175,9 @@ func FuzzTouchModifiedRoundTrip(f *testing.F) {
 // string, the rewrite keeps the key set and the body, and a target with no
 // control character is read back by Load as declared.
 func FuzzRootIndexMarker(f *testing.F) {
-	for _, s := range []string{"0.2", "0.3", "1.0", "0.2\ninjected: true", "0.2\r---\r", "'", "\"", "- x", "{a: b}", " 0.2 "} {
+	// "\t\n0": yaml.v3 picks a literal block for it, whose tab-led line no parser
+	// reads back.
+	for _, s := range []string{"0.2", "0.3", "1.0", "0.2\ninjected: true", "0.2\r---\r", "'", "\"", "- x", "{a: b}", " 0.2 ", "\t\n0"} {
 		f.Add(s)
 	}
 	const body = "\n# Index\n\n---\n\nA rule above.\n"

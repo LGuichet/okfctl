@@ -61,10 +61,10 @@ func TestRenderIndex_RootEnumeratesOwnDirectoryDeterministically(t *testing.T) {
 		t.Errorf("index must not emit `type: Index` frontmatter; got:\n%s", got)
 	}
 	// §8: child directories are linked dir-relatively, sorted.
-	li := strings.Index(got, "](lifting/)")
-	wi := strings.Index(got, "](wine/)")
+	li := strings.Index(got, "](lifting/index.md)")
+	wi := strings.Index(got, "](wine/index.md)")
 	if li < 0 || wi < 0 {
-		t.Errorf("root index must link child dirs as `lifting/` and `wine/`; got:\n%s", got)
+		t.Errorf("root index must link child dirs as `lifting/index.md` and `wine/index.md`; got:\n%s", got)
 	}
 	if li > wi {
 		t.Errorf("child directories not sorted (lifting before wine); got:\n%s", got)

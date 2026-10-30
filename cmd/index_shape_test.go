@@ -58,7 +58,7 @@ func TestIndexBuild_DefaultShapeInRootIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(root), "* [Design](design/) (2 concepts · Concept, Map · shared tags: ux)") {
+	if !strings.Contains(string(root), "* [Design](design/index.md) (2 concepts · Concept, Map · shared tags: ux)") {
 		t.Errorf("default build must carry the shape suffix; got:\n%s", root)
 	}
 }
@@ -79,7 +79,7 @@ func TestIndexBuild_NoShapeFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(root), "* [Design](design/)\n") {
+	if !strings.Contains(string(root), "* [Design](design/index.md)\n") {
 		t.Errorf("--no-shape must render the bare §8 bullet; got:\n%s", root)
 	}
 	if strings.Contains(string(root), "concepts") {
@@ -112,7 +112,7 @@ func TestIndexBuild_TagMinMax(t *testing.T) {
 		t.Fatalf("index build --shape-tag-max: %v", err)
 	}
 	root, _ := os.ReadFile(filepath.Join(dir, "index.md"))
-	line := shapeLineFor(string(root), "](g/)")
+	line := shapeLineFor(string(root), "](g/index.md)")
 	if strings.Count(line, "t") < 2 || !strings.Contains(line, "…") {
 		t.Errorf("--shape-tag-max 2 must cap to 2 tags with an ellipsis; got: %q", line)
 	}
@@ -122,7 +122,7 @@ func TestIndexBuild_TagMinMax(t *testing.T) {
 		t.Fatalf("index build --shape-tag-min: %v", err)
 	}
 	root2, _ := os.ReadFile(filepath.Join(dir, "index.md"))
-	line2 := shapeLineFor(string(root2), "](g/)")
+	line2 := shapeLineFor(string(root2), "](g/index.md)")
 	if strings.Contains(line2, "shared tags") {
 		t.Errorf("--shape-tag-min 3 must suppress the tag segment; got: %q", line2)
 	}

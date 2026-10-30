@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -250,8 +251,26 @@ func migrateTimeString(v any) string {
 // version markers (.okf sidecar and bundle-root index.md). It never touches a
 // judgment item — those stay for the plan's consumer.
 func MigrateApply(root string, b *Bundle, plan MigratePlan) error {
-	for _, nm := range plan.Nodes {
-		abs := filepath.Join(root, filepath.FromSlash(nm.Path))
+	// The plan is a JSON file the user (or an agent) may have edited between
+	// phases, so nothing in it is trusted. Validate it whole before any write.
+	// §12: the .okf sidecar is line-keyed, so a line break in the target would
+	// write a second, forged key into it.
+	for _, r := range plan.TargetVersion {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("migrate plan target_version %q contains a control character", plan.TargetVersion)
+		}
+	}
+	// §3: every node the plan names must live inside the bundle root.
+	abss := make([]string, len(plan.Nodes))
+	for i, nm := range plan.Nodes {
+		abs, err := fsutil.ResolveInRoot(root, nm.Path)
+		if err != nil {
+			return fmt.Errorf("migrate plan node %s: %w", nm.Path, err)
+		}
+		abss[i] = abs
+	}
+	for i, nm := range plan.Nodes {
+		abs := abss[i]
 		raw, err := os.ReadFile(abs) //nolint:gosec // G304: reading a node from the user's own bundle
 		if err != nil {
 			return fmt.Errorf("read %s: %w", nm.Path, err)
@@ -263,7 +282,7 @@ func MigrateApply(root string, b *Bundle, plan MigratePlan) error {
 		if bytes.Equal(out, raw) {
 			continue
 		}
-		if err := os.WriteFile(abs, out, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+		if err := fsutil.WriteFileAtomic(abs, out, 0o644); err != nil { //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 			return fmt.Errorf("write %s: %w", nm.Path, err)
 		}
 	}
@@ -493,7 +512,7 @@ func bumpOkfSidecar(root, target string) error {
 	if !changed {
 		return nil
 	}
-	return os.WriteFile(abs, []byte(strings.Join(lines, "\n")), 0o644) //nolint:gosec // G306: the .okf sidecar is a shareable bundle artifact; 0o644 is intended
+	return fsutil.WriteFileAtomic(abs, []byte(strings.Join(lines, "\n")), 0o644) //nolint:gosec // G306: the .okf sidecar is a shareable bundle artifact; 0o644 is intended
 }
 
 // bumpRootIndexMarker rewrites the bundle-root index.md okf_version marker to
@@ -542,7 +561,7 @@ func bumpRootIndexMarker(root, target string) error {
 	if bytes.Equal(out.Bytes(), raw) {
 		return nil
 	}
-	return os.WriteFile(abs, out.Bytes(), 0o644) //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
+	return fsutil.WriteFileAtomic(abs, out.Bytes(), 0o644) //nolint:gosec // G306: a bundle node is a shareable knowledge document; 0o644 is intended
 }
 
 // findScalar returns the scalar value of key in a mapping, or "".

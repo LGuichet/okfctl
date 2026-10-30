@@ -20,6 +20,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cwest/okfctl/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,7 +57,7 @@ func TouchModifiedFile(abs string, at time.Time) error {
 		out.WriteString("---\nmodified: " + stamp + "\n---\n")
 		out.Write(raw)
 		// A bundle node is a shareable knowledge document; 0o644 is intended.
-		return os.WriteFile(abs, out.Bytes(), 0o644) //nolint:gosec // G306: shareable bundle content file
+		return fsutil.WriteFileAtomic(abs, out.Bytes(), 0o644) //nolint:gosec // G306: shareable bundle content file
 	}
 
 	var doc yaml.Node
@@ -85,7 +86,7 @@ func TouchModifiedFile(abs string, at time.Time) error {
 	// so the only bytes that change are inside the frontmatter block.
 	out.Write(rawAfter)
 	// A bundle node is a shareable knowledge document; 0o644 is intended.
-	return os.WriteFile(abs, out.Bytes(), 0o644) //nolint:gosec // G306: shareable bundle content file
+	return fsutil.WriteFileAtomic(abs, out.Bytes(), 0o644) //nolint:gosec // G306: shareable bundle content file
 }
 
 // frontmatterMapping unwraps a decoded yaml document to its top-level mapping

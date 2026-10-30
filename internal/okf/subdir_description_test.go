@@ -22,7 +22,7 @@ import (
 )
 
 // subdirBullet returns the first Subdirectories bullet whose link target matches
-// linkTarget (e.g. "topics/") from an index body, or "" when none is present.
+// linkTarget (e.g. "topics/index.md") from an index body, or "" when none is present.
 func subdirBullet(body, linkTarget string) string {
 	for _, l := range strings.Split(body, "\n") {
 		if strings.Contains(l, "]("+linkTarget+")") && strings.HasPrefix(l, "* [") {
@@ -34,7 +34,7 @@ func subdirBullet(body, linkTarget string) string {
 
 // TestSubdirDescription_SurvivesThreeBuilds pins the primary §8 defect: a
 // hand-written subdirectory description on a parent index entry
-// (`* [Title](subdir/) - description`) survives repeated `index build` runs
+// (`* [Title](subdir/index.md) - description`) survives repeated `index build` runs
 // byte-identically, and `index check` reports the index current (rc 0) on it.
 // OKF §8: `* [Subdirectory](subdir/) - short description of the subdirectory`.
 func TestSubdirDescription_SurvivesThreeBuilds(t *testing.T) {
@@ -60,8 +60,8 @@ func TestSubdirDescription_SurvivesThreeBuilds(t *testing.T) {
 	}
 	const desc = "Parts of speech, punctuation and sentence structure."
 	edited := strings.Replace(string(raw),
-		"* [Topics](topics/) (",
-		"* [Topics](topics/) - "+desc+" (", 1)
+		"* [Topics](topics/index.md) (",
+		"* [Topics](topics/index.md) - "+desc+" (", 1)
 	if edited == string(raw) {
 		t.Fatalf("test setup: no Topics subdir bullet to edit in:\n%s", raw)
 	}
@@ -128,7 +128,7 @@ func TestSubdirDescription_ChildFrontmatterStableAcrossBuilds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bl1 := subdirBullet(string(root1), "topics/")
+	bl1 := subdirBullet(string(root1), "topics/index.md")
 	if !strings.Contains(bl1, "- From child frontmatter.") {
 		t.Fatalf("build #1 must honor child-frontmatter description; got bullet: %q", bl1)
 	}
@@ -145,7 +145,7 @@ func TestSubdirDescription_ChildFrontmatterStableAcrossBuilds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bl2 := subdirBullet(string(root2), "topics/")
+	bl2 := subdirBullet(string(root2), "topics/index.md")
 	if !strings.Contains(bl2, "- From child frontmatter.") {
 		t.Fatalf("build #2 dropped the child-frontmatter description (non-idempotent build); got bullet: %q", bl2)
 	}
@@ -187,12 +187,12 @@ func TestSubdirDescription_EndingInParensSurvives(t *testing.T) {
 			var edited string
 			if tc.opts.Enabled {
 				edited = strings.Replace(string(raw),
-					"* [Topics](topics/) (",
-					"* [Topics](topics/) - "+desc+" (", 1)
+					"* [Topics](topics/index.md) (",
+					"* [Topics](topics/index.md) - "+desc+" (", 1)
 			} else {
 				edited = strings.Replace(string(raw),
-					"* [Topics](topics/)\n",
-					"* [Topics](topics/) - "+desc+"\n", 1)
+					"* [Topics](topics/index.md)\n",
+					"* [Topics](topics/index.md) - "+desc+"\n", 1)
 			}
 			if edited == string(raw) {
 				t.Fatalf("test setup: no Topics bullet to edit in:\n%s", raw)
@@ -213,7 +213,7 @@ func TestSubdirDescription_EndingInParensSurvives(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bl := subdirBullet(string(got), "topics/")
+			bl := subdirBullet(string(got), "topics/index.md")
 			if !strings.Contains(bl, "- "+desc) {
 				t.Fatalf("parenthesised description must survive (not eaten as shape suffix); got bullet: %q", bl)
 			}
@@ -254,8 +254,8 @@ func TestSubdirDescription_SurvivesSubtreeChangeBetweenBuilds(t *testing.T) {
 	}
 	const desc = "Parts of speech."
 	edited := strings.Replace(string(raw),
-		"* [Topics](topics/) (",
-		"* [Topics](topics/) - "+desc+" (", 1)
+		"* [Topics](topics/index.md) (",
+		"* [Topics](topics/index.md) - "+desc+" (", 1)
 	if edited == string(raw) {
 		t.Fatalf("test setup: no Topics bullet to edit in:\n%s", raw)
 	}
@@ -278,7 +278,7 @@ func TestSubdirDescription_SurvivesSubtreeChangeBetweenBuilds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bl := subdirBullet(string(got), "topics/")
+	bl := subdirBullet(string(got), "topics/index.md")
 
 	// The description must be preserved verbatim, exactly once.
 	if !strings.Contains(bl, "- "+desc) {
@@ -321,8 +321,8 @@ func TestSubdirDescription_TitleRegeneratedKeepsDescription(t *testing.T) {
 	}
 	const desc = "Parts of speech."
 	edited := strings.Replace(string(raw),
-		"* [Topics](topics/) (",
-		"* [Some Other Title](topics/) - "+desc+" (", 1)
+		"* [Topics](topics/index.md) (",
+		"* [Some Other Title](topics/index.md) - "+desc+" (", 1)
 	if edited == string(raw) {
 		t.Fatalf("test setup: no Topics bullet to edit in:\n%s", raw)
 	}
@@ -341,9 +341,9 @@ func TestSubdirDescription_TitleRegeneratedKeepsDescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bl := subdirBullet(string(got), "topics/")
+	bl := subdirBullet(string(got), "topics/index.md")
 	// Title is tool-owned: regenerated back to "Topics".
-	if !strings.HasPrefix(bl, "* [Topics](topics/)") {
+	if !strings.HasPrefix(bl, "* [Topics](topics/index.md)") {
 		t.Errorf("title must be regenerated (tool-owned); got bullet: %q", bl)
 	}
 	// Description is curator-owned: preserved via link-target match.
@@ -376,9 +376,9 @@ func TestSubdirDescription_RemovedFolderDropsEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	edited := strings.Replace(string(raw),
-		"* [Topics](topics/) (", "* [Topics](topics/) - Topic desc. (", 1)
+		"* [Topics](topics/index.md) (", "* [Topics](topics/index.md) - Topic desc. (", 1)
 	edited = strings.Replace(edited,
-		"* [Grammar](grammar/) (", "* [Grammar](grammar/) - Grammar desc. (", 1)
+		"* [Grammar](grammar/index.md) (", "* [Grammar](grammar/index.md) - Grammar desc. (", 1)
 	if err := os.WriteFile(rootPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -400,14 +400,14 @@ func TestSubdirDescription_RemovedFolderDropsEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	gs := string(got)
-	if strings.Contains(gs, "](topics/)") {
+	if strings.Contains(gs, "](topics/index.md)") {
 		t.Errorf("removed folder's entry must be gone; got:\n%s", gs)
 	}
 	if strings.Contains(gs, "Topic desc.") {
 		t.Errorf("removed folder's description must be gone; got:\n%s", gs)
 	}
 	// The surviving folder keeps its own description, not the vanished one.
-	blG := subdirBullet(gs, "grammar/")
+	blG := subdirBullet(gs, "grammar/index.md")
 	if !strings.Contains(blG, "- Grammar desc.") {
 		t.Errorf("surviving folder must keep its OWN description; got bullet: %q", blG)
 	}
@@ -457,7 +457,7 @@ func TestSubdirDescription_NoDescriptionsByteIdenticalToMain(t *testing.T) {
 		t.Errorf("no-description build must be byte-identical across runs\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
 	// And it must still contain the expected tool-owned bullet (control).
-	if !strings.Contains(string(second), "* [Design](design/) (") {
+	if !strings.Contains(string(second), "* [Design](design/index.md) (") {
 		t.Errorf("expected tool-owned design/ bullet; got:\n%s", second)
 	}
 }
@@ -485,7 +485,7 @@ func TestSubdirDescription_StaleIndexStillFailsCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	edited := strings.Replace(string(raw),
-		"* [Topics](topics/) (", "* [Topics](topics/) - A description. (", 1)
+		"* [Topics](topics/index.md) (", "* [Topics](topics/index.md) - A description. (", 1)
 	if err := os.WriteFile(rootPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -503,5 +503,86 @@ func TestSubdirDescription_StaleIndexStillFailsCheck(t *testing.T) {
 	}
 	if report == "" {
 		t.Errorf("a failing check must name the offending path")
+	}
+}
+
+// TestSubdirDescription_LegacyTrailingSlashLinkMigrates is the positive control
+// for the link-form switch: an index written by an older build links a
+// subdirectory as `topics/` (the spelling of the §8 example). §8 leaves the
+// relative URL open, so the tool now emits `topics/index.md`; the curator
+// description on the legacy bullet must carry over to the rewritten one rather
+// than be dropped because the link target changed spelling.
+func TestSubdirDescription_LegacyTrailingSlashLinkMigrates(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNodeFM(t, dir, "topics/nouns.md", "Concept", "Nouns", "")
+
+	b, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIndex(b); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+	rootPath := filepath.Join(dir, "index.md")
+	raw, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const desc = "Parts of speech."
+	legacy := strings.Replace(string(raw),
+		"* [Topics](topics/index.md) (",
+		"* [Topics](topics/) - "+desc+" (", 1)
+	if legacy == string(raw) {
+		t.Fatalf("test setup: no Topics subdir bullet to rewrite in:\n%s", raw)
+	}
+	if err := os.WriteFile(rootPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIndex(b); err != nil {
+		t.Fatalf("WriteIndex rebuild: %v", err)
+	}
+	got, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bl := subdirBullet(string(got), "topics/index.md")
+	if !strings.HasPrefix(bl, "* [Topics](topics/index.md) - "+desc+" (") {
+		t.Errorf("§8: legacy `topics/` description must carry over to the `topics/index.md` bullet; got:\n%s", got)
+	}
+	if strings.Contains(string(got), "](topics/)") {
+		t.Errorf("rebuild must rewrite the legacy `topics/` link; got:\n%s", got)
+	}
+}
+
+// TestSubdirBulletRE_OnlyDirectoryLinks is the negative control: accepting the
+// `dir/index.md` spelling must not widen the match to an ordinary concept
+// bullet, or a concept description would be captured as a subdirectory's.
+func TestSubdirBulletRE_OnlyDirectoryLinks(t *testing.T) {
+	cases := []struct {
+		line string
+		want string // captured link directory, "" for no match
+	}{
+		{"* [Topics](topics/index.md) - D. (1 concept · Concept)", "topics/"},
+		{"* [Topics](topics/) - D. (1 concept · Concept)", "topics/"},
+		{"* [Nouns](nouns.md) - A concept.", ""},
+		{"* [Nouns](topics/nouns.md) - A concept.", ""},
+		{"* [Root](index.md) - Not a subdirectory.", ""},
+		{"* [Odd](topics/index.md.bak) - Not an index.", ""},
+	}
+	for _, c := range cases {
+		m := subdirBulletRE.FindStringSubmatch(c.line)
+		got := ""
+		if m != nil {
+			got = m[2]
+		}
+		if got != c.want {
+			t.Errorf("subdirBulletRE(%q) = %q, want %q", c.line, got, c.want)
+		}
 	}
 }

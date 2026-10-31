@@ -474,11 +474,20 @@ func WriteIndexWithOptions(b *Bundle, opts IndexShapeOptions) error {
 			return err
 		}
 		out := RenderDirIndexWithOptions(b, dir, opts)
-		// Keep the line endings of the index being replaced (see usesCRLF): a CRLF
-		// checkout (Windows, core.autocrlf=true) stays CRLF instead of flipping
-		// every line. A new or mixed-ending index gets the canonical LF.
-		if existing, err := os.ReadFile(p); err == nil && usesCRLF(existing) { //nolint:gosec // G304: reading the tool's own generated index file
-			out = strings.ReplaceAll(out, "\n", "\r\n")
+		existing, err := os.ReadFile(p) //nolint:gosec // G304: reading the tool's own generated index file
+		if err == nil {
+			// Already current (line endings are not content, as in IndexInSync):
+			// leave the file alone. Rewriting it would only change its line
+			// endings, which on a CRLF checkout makes git report it modified.
+			if normalizeEOL(string(existing)) == out {
+				continue
+			}
+			// Keep the line endings of the index being replaced (see usesCRLF): a
+			// CRLF checkout (Windows, core.autocrlf=true) stays CRLF instead of
+			// flipping every line. A new or mixed-ending index gets the canonical LF.
+			if usesCRLF(existing) {
+				out = strings.ReplaceAll(out, "\n", "\r\n")
+			}
 		}
 		if err := fsutil.WriteFileAtomic(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
 			return err

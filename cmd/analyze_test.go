@@ -120,6 +120,43 @@ func TestAnalyzeCmd_NoStrictFlag(t *testing.T) {
 	}
 }
 
+// A passed §5.5 stale_after surfaces in both outputs and still exits 0: a
+// warning to act on, not a gate. The future-dated node is the negative control.
+func TestAnalyzeCmd_ExpiredStaleAfter_Section5_5(t *testing.T) {
+	dir := mkAnalyzeBundle(t, map[string]string{
+		"index.md":  "---\ntype: Index\ntitle: Index\n---\n\n# Index\n\n- [P](past.md)\n- [F](future.md)\n",
+		"past.md":   "---\ntype: Concept\ntitle: P\nstale_after: 2020-01-01T00:00:00Z\n---\n\n# P\n\nBody.\n",
+		"future.md": "---\ntype: Concept\ntitle: F\nstale_after: 2099-01-01T00:00:00Z\n---\n\n# F\n\nBody.\n",
+	})
+	out, err := runAnalyze(t, dir)
+	if err != nil {
+		t.Fatalf("expired nodes must not fail analyze: %v", err)
+	}
+	if !strings.Contains(out, "past stale_after") || !strings.Contains(out, "past.md (stale_after: 2020-01-01") {
+		t.Fatalf("human report should list past.md under the stale_after section, got:\n%s", out)
+	}
+	if strings.Contains(out, "future.md (stale_after") {
+		t.Fatalf("future.md must not be listed as expired, got:\n%s", out)
+	}
+	js, err := runAnalyze(t, "--json", dir)
+	if err != nil {
+		t.Fatalf("analyze --json: %v", err)
+	}
+	var rep struct {
+		Freshness struct {
+			Expired []struct {
+				Path string `json:"path"`
+			} `json:"expired"`
+		} `json:"freshness"`
+	}
+	if e := json.Unmarshal([]byte(js), &rep); e != nil {
+		t.Fatalf("invalid JSON: %v\n%s", e, js)
+	}
+	if len(rep.Freshness.Expired) != 1 || rep.Freshness.Expired[0].Path != "past.md" {
+		t.Fatalf("want only past.md in freshness.expired, got %+v", rep.Freshness.Expired)
+	}
+}
+
 func TestAnalyzeCmd_CustomStaleDaysInSummary(t *testing.T) {
 	dir := mkAnalyzeBundle(t, map[string]string{
 		"index.md": "---\ntype: Index\ntitle: Index\n---\n\n# Index\n\n- [A](a.md)\n",

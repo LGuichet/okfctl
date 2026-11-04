@@ -141,6 +141,14 @@ type ThinNode struct {
 type FreshnessReport struct {
 	Stale         []StaleNode         `json:"stale"`
 	TimeSensitive []TimeSensitiveNode `json:"time_sensitive"`
+	Expired       []ExpiredNode       `json:"expired"`
+}
+
+// ExpiredNode is a node whose declared §5.5 `stale_after` instant has passed.
+// Unlike StaleNode it needs no threshold: the producer set the date.
+type ExpiredNode struct {
+	Path       string `json:"path"`
+	StaleAfter string `json:"stale_after"`
 }
 
 // StaleNode is a node whose freshness basis date is older than the threshold,
@@ -249,6 +257,9 @@ func (r *AnalyzeReport) normalizeSlices() {
 	}
 	if r.Freshness.TimeSensitive == nil {
 		r.Freshness.TimeSensitive = []TimeSensitiveNode{}
+	}
+	if r.Freshness.Expired == nil {
+		r.Freshness.Expired = []ExpiredNode{}
 	}
 	if r.Connectivity.Orphans == nil {
 		r.Connectivity.Orphans = []AnalyzeNodeRef{}
@@ -483,6 +494,14 @@ func analyzeFreshness(b *Bundle, opts AnalyzeOptions) FreshnessReport {
 					Path: p, AgeDays: agePtr, Markers: markers,
 				})
 			}
+		}
+		// §5.5: stale once now >= stale_after. Independent of the age basis
+		// above, and silent for an absent or unparseable value (§11: an
+		// optional key is never a failure).
+		if n.IsStale(now) {
+			out.Expired = append(out.Expired, ExpiredNode{
+				Path: p, StaleAfter: frontmatterTimeString(n.Frontmatter["stale_after"]),
+			})
 		}
 	}
 	return out

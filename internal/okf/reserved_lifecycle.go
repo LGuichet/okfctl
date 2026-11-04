@@ -15,7 +15,6 @@
 package okf
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path"
@@ -26,6 +25,32 @@ import (
 
 	"github.com/cwest/okfctl/internal/fsutil"
 )
+
+// normalizeEOL folds CRLF to LF so a CRLF-checked-out reserved file (Windows
+// with core.autocrlf=true) parses and compares identically to its LF form. It
+// is the "normalize on read" half of okfctl's index line-ending policy: an
+// index.md is normalized before regex matching (preservedSubdirDescriptions) and
+// before the staleness comparison (IndexInSync), so a line-ending-only
+// difference is never mistaken for content drift (issue #185). A lone CR not
+// part of a CRLF pair is left alone — only the \r\n pair is folded.
+func normalizeEOL(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
+// usesCRLF reports whether a reserved file is dominantly CRLF: true only when
+// EVERY line break in it is CRLF (every \n is preceded by \r). It is the
+// "preserve on write" half of the policy — WriteIndex writes its render back in
+// the ending the on-disk file already used, so an up-to-date CRLF index stays
+// CRLF (zero churn, issue #185) while a new file or a mixed-ending file is
+// written LF. The choice depends only on that one file, so it is deterministic
+// on any machine. A file with no line break at all is not CRLF.
+func usesCRLF(s string) bool {
+	nl := strings.Count(s, "\n")
+	if nl == 0 {
+		return false
+	}
+	return strings.Count(s, "\r\n") == nl
+}
 
 // neighborhood returns the top-level directory of a bundle-relative slash path,
 // or "" for a root-level node (rendered under a "(root)" group).
@@ -258,11 +283,14 @@ func subdirEntry(title, url, desc, shape string) string {
 }
 
 // subdirBulletRE matches one §8 Subdirectories bullet, capturing the link
-// target (group 2) and the trailing text after `](url)` (group 3). The trailing
+// target's directory part (group 2, e.g. "topics/") and the trailing text after
+// `](url)` (group 3). Both spellings §8 permits are accepted—the current
+// `topics/index.md` and the legacy `topics/` older builds wrote—and both key on
+// the same "topics/", so a curator description survives the switch. The trailing
 // text holds an optional ` - description` and/or the tool-owned shape suffix; we
 // separate those deterministically in preservedSubdirDescriptions rather than
 // with a greedy regex, so a description that itself ends in `(…)` survives.
-var subdirBulletRE = regexp.MustCompile(`^\* \[([^\]]*)\]\(([^)]+/)\)(.*)$`)
+var subdirBulletRE = regexp.MustCompile(`^\* \[([^\]]*)\]\(([^)]+/)(?:index\.md)?\)(.*)$`)
 
 // toolShapeSuffixRE matches a tool-owned shape suffix at the END of a bullet's
 // trailing text, STRUCTURALLY (not by equality against a freshly recomputed
@@ -323,6 +351,13 @@ func preservedSubdirDescriptions(b *Bundle, dir string, opts IndexShapeOptions) 
 	if !ok || idx == nil {
 		return out
 	}
+	// Normalize line endings before splitting (OKF §8 parse path; issue #185):
+	// a CRLF-checked-out index leaves a trailing \r on every line, which stops
+	// the $-anchored subdirBulletRE / toolShapeSuffixRE from matching the
+	// tool-owned shape suffix — the stale suffix would then be captured into the
+	// curator description and doubled on the next build. Folding CRLF->LF here
+	// (normalize on read) fixes that at the same seam that keeps the description
+	// curator-owned/verbatim.
 	for _, line := range strings.Split(normalizeEOL(idx.Body), "\n") {
 		m := subdirBulletRE.FindStringSubmatch(line)
 		if m == nil {
@@ -355,7 +390,7 @@ func preservedSubdirDescriptions(b *Bundle, dir string, opts IndexShapeOptions) 
 // RenderDirIndex produces the deterministic index.md body for one directory of
 // the bundle (dir is bundle-relative slash form; "" is the bundle root), per OKF
 // §8: it enumerates ONLY that directory's own immediate contents — its
-// content-bearing child directories (linked dir-relatively as `child/`) under a
+// content-bearing child directories (linked dir-relatively as `child/index.md`) under a
 // "Subdirectories" section, and the concept nodes living directly in it (linked
 // by base name) under a "Concepts" section, each carrying the linked concept's
 // description from frontmatter. Links are relative to dir itself, never
@@ -408,11 +443,14 @@ func RenderDirIndexWithOptions(b *Bundle, dir string, opts IndexShapeOptions) st
 			if pd, ok := preserved[linkTarget]; ok {
 				desc = pd
 			}
-			// Dir-relative link: the child's base name plus a trailing slash.
+			// Dir-relative link to the child's own index file, not the bare
+			// directory: §8 leaves the relative URL open, and a file target
+			// resolves for a reader that can only open files (an agent's read
+			// tool, a plain Markdown viewer), matching the reference producer.
 			// The shape suffix trails the §8 `[Title](url) - description`
 			// grammar on the SAME bullet, so a consumer reading only that
 			// grammar loses nothing.
-			sb.WriteString(subdirEntry(title, linkTarget, desc, dirShape(b, child, opts)))
+			sb.WriteString(subdirEntry(title, linkTarget+"index.md", desc, dirShape(b, child, opts)))
 		}
 	}
 	if len(concepts) > 0 {
@@ -467,12 +505,24 @@ func WriteIndexWithOptions(b *Bundle, opts IndexShapeOptions) error {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil { //nolint:gosec // G301: shareable bundle content dir; 0o755 is intended
 			return err
 		}
-		out := RenderDirIndexWithOptions(b, dir, opts)
-		// Keep the line endings of the index being replaced (see usesCRLF): a CRLF
-		// checkout (Windows, core.autocrlf=true) stays CRLF instead of flipping
-		// every line. A new or mixed-ending index gets the canonical LF.
-		if existing, err := os.ReadFile(p); err == nil && usesCRLF(existing) { //nolint:gosec // G304: reading the tool's own generated index file
-			out = strings.ReplaceAll(out, "\n", "\r\n")
+		rendered := RenderDirIndexWithOptions(b, dir, opts)
+		out := rendered
+		if existing, rerr := os.ReadFile(p); rerr == nil { //nolint:gosec // G304: reading the tool's own generated index file
+			// Already current (line endings are not content, as in IndexInSync):
+			// leave the file alone. Rewriting it would only change its line
+			// endings, which on a CRLF checkout makes git report it modified.
+			if normalizeEOL(string(existing)) == rendered {
+				continue
+			}
+			// Preserve on write (issue #185): the render is produced LF, but if the
+			// index.md already on disk is dominantly CRLF (a Windows checkout), write
+			// the render back in CRLF so git sees no whole-file line-ending churn. A
+			// new file, or one with mixed endings, is written LF. The choice depends
+			// only on this one file, so it is deterministic on any machine and leaves
+			// LF/Linux behavior unchanged.
+			if usesCRLF(string(existing)) {
+				out = strings.ReplaceAll(rendered, "\n", "\r\n")
+			}
 		}
 		if err := fsutil.WriteFileAtomic(p, []byte(out), 0o644); err != nil { //nolint:gosec // G306: a bundle index file is shareable content; 0o644 is intended
 			return err
@@ -517,8 +567,11 @@ func IndexInSyncWithOptions(b *Bundle, opts IndexShapeOptions) (bool, string) {
 		if err != nil {
 			return false, fmt.Sprintf("%s is missing or unreadable; run `okfctl index build`", filepath.ToSlash(rel(b.Root, p)))
 		}
-		// Line endings are not content: a CRLF checkout of an LF-built index is
-		// in sync. Everything else is still compared byte for byte.
+		// Compare CONTENT, not bytes (issue #185): a CRLF-checked-out index
+		// (Windows, core.autocrlf=true) differs from the LF render only in line
+		// endings. Normalize on read so a line-ending-only difference is not
+		// reported as drift — any other difference is still drift, so genuine
+		// staleness is still caught.
 		if normalizeEOL(string(onDisk)) != RenderDirIndexWithOptions(b, dir, opts) {
 			return false, fmt.Sprintf("%s is out of date; run `okfctl index build` to regenerate", filepath.ToSlash(rel(b.Root, p)))
 		}
@@ -534,20 +587,6 @@ func IndexInSyncWithOptions(b *Bundle, opts IndexShapeOptions) (bool, string) {
 		}
 	}
 	return true, ""
-}
-
-// normalizeEOL folds CRLF line endings to LF, the form RenderDirIndex emits.
-func normalizeEOL(s string) string {
-	return strings.ReplaceAll(s, "\r\n", "\n")
-}
-
-// usesCRLF reports whether every line break in src is CRLF (and there is at
-// least one). Mixed endings, or none, report false so the writer falls back to
-// LF. The decision depends only on the file being replaced, never on other
-// files or on the machine running the tool.
-func usesCRLF(src []byte) bool {
-	crlf := bytes.Count(src, []byte("\r\n"))
-	return crlf > 0 && crlf == bytes.Count(src, []byte("\n"))
 }
 
 // rel returns the bundle-relative form of an absolute path, best-effort (the
@@ -593,14 +632,34 @@ func AppendLog(root, message string) error {
 	p := filepath.Join(root, "log.md")
 	existing, err := os.ReadFile(p) //nolint:gosec // G304: reading the user's own bundle log.md
 	if err != nil {
-		// Create a fresh §9 log with the default title.
+		// Create a fresh §9 log with the default title. A new file is always LF.
 		out := logHeader + "## " + today + "\n* " + message + "\n"
 		return fsutil.WriteFileAtomic(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
 	}
 
-	lg := parseLog(string(existing))
-	lg.addEntry(today, message)
-	return fsutil.WriteFileAtomic(p, []byte(lg.render()), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
+	// Normalize on read (issue #185, applied to log.md): a CRLF-checked-out log
+	// (Windows, core.autocrlf=true) leaves a trailing \r on every line when
+	// parseLog splits on "\n". That \r leaks into the verbatim preamble and
+	// entries and defeats the $-anchored legacy-bullet regex, so a fold would
+	// strand the bullet or capture the \r into its message. Folding CRLF->LF
+	// before the parse keeps the log model purely LF, so the render below is
+	// clean and the re-ending choice is the ONLY place endings are decided.
+	rendered := func() string {
+		lg := parseLog(normalizeEOL(string(existing)))
+		lg.addEntry(today, message)
+		return lg.render()
+	}()
+	// Preserve on write (issue #185): the render is LF, but if the log.md already
+	// on disk is dominantly CRLF, write the whole file back in CRLF so a Windows
+	// checkout sees no mixed-ending corruption and git sees no whole-file churn.
+	// A new file (handled above) or a mixed-/lone-CR file stays LF. The choice
+	// depends only on this one file, so it is deterministic on any machine and
+	// leaves LF/Linux behavior unchanged.
+	out := rendered
+	if usesCRLF(string(existing)) {
+		out = strings.ReplaceAll(rendered, "\n", "\r\n")
+	}
+	return fsutil.WriteFileAtomic(p, []byte(out), 0o644) //nolint:gosec // G306: log.md is shareable bundle content; 0o644 is intended
 }
 
 // ReadLog returns the log.md body (empty string if the file is absent).

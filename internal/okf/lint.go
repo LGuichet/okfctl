@@ -663,14 +663,16 @@ func lintTypeHygiene(b *Bundle) []LintFinding {
 // case-sensitively, so one tag spelled three ways is three disjoint result sets;
 // this surfaces that drift the same way type-hygiene does for `type`.
 //
-// The fold is tagKeys: case, trim, and separator-insensitive surface forms,
-// with KStem's guarded plural rules folding a spelling onto another only when
-// that other spelling is itself a tag in the bundle. The fold is a heuristic;
-// anti-taxonomy stands (PRD §7.4): it reports spellings that fold together and
-// never rejects a value, a warning class—never a validate rejection. The message
-// lists each variant with its per-node count, variants sorted.
+// The fold is the bundle-scoped tagFolder: case- and separator-insensitive, plus
+// a vocabulary-aware plural merge (see newTagFolder). Anti-taxonomy stands (PRD
+// §7.4): it flags only spellings that fold to ONE value, never two genuinely
+// distinct values, and it is a warning class — never a validate rejection. The
+// message lists each variant with its per-node count, variants ordered
+// most-common-first (the dominant spelling to normalize toward leads), ties
+// broken alphabetically.
 func lintTagHygiene(b *Bundle) []LintFinding {
-	keys := bundleTagKeys(b)
+	fold := newTagFolder(b)
+
 	// canonical -> raw tag value -> set of node paths carrying it.
 	groups := map[string]map[string]map[string]bool{}
 	for _, n := range b.Nodes {
@@ -681,7 +683,7 @@ func lintTagHygiene(b *Bundle) []LintFinding {
 				continue
 			}
 			seen[raw] = true
-			c := keys[raw]
+			c := fold(raw)
 			if c == "" {
 				continue
 			}
@@ -709,7 +711,16 @@ func lintTagHygiene(b *Bundle) []LintFinding {
 		for v := range groups[c] {
 			variants = append(variants, v)
 		}
-		sort.Strings(variants)
+		// Order variants most-common-first so the dominant spelling to
+		// normalize toward leads the message; ties broken alphabetically for a
+		// deterministic order.
+		sort.Slice(variants, func(i, j int) bool {
+			ni, nj := len(groups[c][variants[i]]), len(groups[c][variants[j]])
+			if ni != nj {
+				return ni > nj
+			}
+			return variants[i] < variants[j]
+		})
 		parts := make([]string, 0, len(variants))
 		for _, v := range variants {
 			n := len(groups[c][v])
@@ -732,12 +743,12 @@ func pluralNodes(n int) string {
 	return "nodes"
 }
 
-// canonFold is the type fold: case-insensitive, trimmed, and singular (drop a
-// single trailing 's'). It is separator-SENSITIVE by design. Tags fold
-// differently (see tagKeys): short slug-like tag values (aws, ops, news) are
-// exactly where an unguarded trailing-'s' rule merges distinct values, so the
-// tag path uses KStem's guarded plural rules instead. Both paths share the case
-// and trim steps.
+// canonFold is the shared base fold: case-insensitive, trimmed, and singular
+// (drop a single trailing 's'). It is the one place `type` and `tags`
+// near-duplicate grouping agree on, so the tool can never apply two different
+// folds to the same kind of §4.1 value. It is separator-SENSITIVE by design —
+// separator-insensitivity is a tag-only layer (see canonTag) and must not leak
+// into the type path.
 func canonFold(s string) string {
 	c := strings.ToLower(strings.TrimSpace(s))
 	if len(c) > 1 && strings.HasSuffix(c, "s") {
@@ -748,6 +759,163 @@ func canonFold(s string) string {
 
 // canonType folds a `type` value for near-duplicate grouping. It is exactly the
 // shared base fold (case + trim + single trailing 's'); it deliberately does NOT
-// add tag's separator rule, so type-hygiene behavior is unchanged by the shared
-// extraction.
+// add tag's separator or plural rules, so type-hygiene behavior is unchanged by
+// the shared extraction.
 func canonType(s string) string { return canonFold(s) }
+
+// canonTag computes a tag's base key: lower-cased, trimmed, and
+// separator-insensitive. It does NOT strip plurals — pluralization is a
+// vocabulary-aware, bundle-scoped decision made by newTagFolder, because a
+// plural should only fold onto a stem the corpus actually attests. Two tags that
+// differ only in case or in how a compound is joined share a base key:
+//
+//	Run Book / run-book / run_book / runbook  ->  runbook
+//
+// Separators are '-', '_', space, and — per Unicode UAX #29 — a '/' or '.' with
+// a letter on BOTH sides (node.js == nodejs, ci/cd == cicd), so a leading '.'
+// stays word-internal-free (.net does not fold onto net).
+func canonTag(s string) string {
+	c := strings.ToLower(strings.TrimSpace(s))
+	c = tagSeparators.Replace(c)
+	c = dropLetterFlankedSeparators(c, '/', '.')
+	return c
+}
+
+// tagSeparators are the always-intra-tag separators (§4.1 tags are free-form): a
+// hyphen, underscore, or space. Two tags that differ only in how a compound is
+// joined (home-lab vs homelab, run book vs runbook) are one value spelled two
+// ways.
+var tagSeparators = strings.NewReplacer("-", "", "_", "", " ", "")
+
+// dropLetterFlankedSeparators removes each listed rune only when a letter sits on
+// both sides of it (UAX #29 word boundaries: a letter-flanked '.' or '/' is
+// word-internal). This folds node.js->nodejs and ci/cd->cicd while leaving a
+// leading/trailing or non-letter-flanked separator in place (.net stays apart
+// from net).
+func dropLetterFlankedSeparators(s string, seps ...rune) string {
+	isSep := func(r rune) bool {
+		for _, x := range seps {
+			if r == x {
+				return true
+			}
+		}
+		return false
+	}
+	rs := []rune(s)
+	var out []rune
+	for i, r := range rs {
+		if isSep(r) && i > 0 && i < len(rs)-1 &&
+			isLetter(rs[i-1]) && isLetter(rs[i+1]) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return string(out)
+}
+
+func isLetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+// pluralInvariants are forms that LOOK like plurals but are not — Porter2's
+// exceptional set (the Snowball English stemmer's invariant forms). A tag in this
+// set is never plural-stripped, so `news` stays `news` (not `new`) and `bias`
+// stays `bias` (not `bia`). See https://snowballstem.org/algorithms/english/.
+var pluralInvariants = map[string]bool{
+	"news": true, "atlas": true, "cosmos": true, "bias": true,
+	"caress": true, "gas": true,
+}
+
+// kstemPlural returns the de-pluralized candidate stems for a base-key tag, most
+// specific first, per the plural() rules of KStem (the UMass CIIR stemmer shipped
+// as Lucene's KStemmer.java, plural()). It is a STEM GENERATOR, not a decision:
+// the caller folds onto a candidate only if the bundle attests it (see
+// newTagFolder), so a nonsense stem is never reported. Guards:
+//
+//   - letters-only words only (k8s, v1, oauth2 are left alone);
+//   - length > 2;
+//   - a plain final 's' is stripped only when length > 3 and the word does not
+//     end in 'ss' or 'ous' (keeps aws, ops, ios, dns, class, famous);
+//   - '-ies' -> try '-ie' then '-y'; '-es' -> try dropping 's' then 'es',
+//     skipping the '-e' candidate after a double 's' (crosses, processes);
+//   - Porter2 invariants (news, atlas, cosmos, bias, …) are never stripped.
+//
+// This is an adaptation of KStem's plural(): KStem decides between candidates
+// with an English dictionary; here the bundle's own tag vocabulary is the
+// dictionary, which is exactly what a near-duplicate finding needs (two attested
+// spellings) and means no out-of-vocabulary stem can ever surface.
+func kstemPlural(w string) []string {
+	if len(w) <= 2 || !lettersOnly(w) || pluralInvariants[w] {
+		return nil
+	}
+	if !strings.HasSuffix(w, "s") {
+		return nil
+	}
+	switch {
+	case strings.HasSuffix(w, "ies"):
+		// calories -> calorie (try) then category: policies -> policy.
+		stem := w[:len(w)-3]
+		return []string{stem + "ie", stem + "y"}
+	case strings.HasSuffix(w, "es"):
+		stem := w[:len(w)-2] // drop "es"
+		var cands []string
+		// Try dropping just the 's' (…e) UNLESS the char before "es" is itself
+		// 's' (crosses -> cross, not crosse; processes -> process, not processe).
+		doubleS := len(stem) > 0 && stem[len(stem)-1] == 's'
+		if !doubleS {
+			cands = append(cands, w[:len(w)-1]) // drop 's' -> …e
+		}
+		cands = append(cands, stem) // drop 'es'
+		return cands
+	default:
+		// plain trailing 's': strip only when len>3, not 'ss', not 'ous'.
+		if len(w) > 3 && !strings.HasSuffix(w, "ss") && !strings.HasSuffix(w, "ous") {
+			return []string{w[:len(w)-1]}
+		}
+		return nil
+	}
+}
+
+func lettersOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !isLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// newTagFolder returns a bundle-scoped fold that maps a raw tag to its canonical
+// form. The fold is two-pass and VOCABULARY-AWARE, which is why it takes the
+// bundle: a plural is folded onto its stem only when that stem is itself an
+// attested base key in this bundle. Pass 1 collects every attested base key
+// (canonTag of every tag on every node). Pass 2 resolves a tag by walking its
+// KStem plural candidates and folding onto the first one the bundle attests;
+// absent any attested candidate the base key is canonical as-is. This keeps the
+// anti-taxonomy posture (nonsense stems can never be reported) and makes lint and
+// analyze agree on when two spellings are one tag.
+func newTagFolder(b *Bundle) func(string) string {
+	attested := map[string]bool{}
+	for _, n := range b.Nodes {
+		for _, raw := range n.Tags() {
+			if base := canonTag(raw); base != "" {
+				attested[base] = true
+			}
+		}
+	}
+	return func(raw string) string {
+		base := canonTag(raw)
+		if base == "" {
+			return ""
+		}
+		for _, cand := range kstemPlural(base) {
+			if attested[cand] {
+				return cand
+			}
+		}
+		return base
+	}
+}

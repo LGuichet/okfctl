@@ -19,157 +19,346 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-// toCRLF rewrites a file with CRLF endings, as a Windows checkout with
-// core.autocrlf=true would materialise it.
-func toCRLF(t *testing.T, p string) {
+// toCRLF rewrites every index.md under dir to CRLF, as a Windows checkout with
+// core.autocrlf=true does (see issue #185). It is the test-side equivalent of
+// the issue's `find kb -name index.md -exec perl -pi -e 's/\r?\n/\r\n/'`.
+func toCRLF(t *testing.T, dir string) {
 	t.Helper()
-	raw, err := os.ReadFile(p)
+	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Base(p) != "index.md" {
+			return nil
+		}
+		b, rerr := os.ReadFile(p) //nolint:gosec // G304: test fixture under t.TempDir()
+		if rerr != nil {
+			return rerr
+		}
+		// Normalize to LF first, then to CRLF, so the result is pure CRLF
+		// regardless of the input's existing endings.
+		lf := strings.ReplaceAll(string(b), "\r\n", "\n")
+		crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+		return os.WriteFile(p, []byte(crlf), 0o644) //nolint:gosec // G306: test fixture
+	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	crlf := strings.ReplaceAll(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n", "\r\n")
-	if err := os.WriteFile(p, []byte(crlf), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func readFile(t *testing.T, p string) string {
+// readFile is a small test helper that returns a file's bytes as a string.
+func readFileStr(t *testing.T, p string) string {
 	t.Helper()
-	raw, err := os.ReadFile(p)
+	b, err := os.ReadFile(p) //nolint:gosec // G304: test fixture under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(raw)
+	return string(b)
 }
 
-func buildAndReload(t *testing.T, dir string) *Bundle {
-	t.Helper()
-	b, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteIndex(b); err != nil {
-		t.Fatal(err)
-	}
-	b, err = Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
-func TestUsesCRLF(t *testing.T) {
+// TestUsesCRLF_Table pins the dominant-ending detector: a file is CRLF only when
+// EVERY line break is CRLF. A mixed-ending file, an all-LF file, and a file with
+// no line break at all are NOT CRLF (new/mixed indexes stay LF on write).
+func TestUsesCRLF_Table(t *testing.T) {
 	cases := []struct {
+		name string
 		in   string
 		want bool
 	}{
-		{"", false},
-		{"no newline", false},
-		{"a\nb\n", false},
-		{"a\r\nb\r\n", true},
-		{"a\r\nb", true},
-		{"a\r\nb\n", false}, // mixed falls back to LF
-		{"a\rb\r", false},   // bare CR is not a line ending we emit
+		{"pure LF", "a\nb\nc\n", false},
+		{"pure CRLF", "a\r\nb\r\nc\r\n", true},
+		{"mixed mostly CRLF one LF", "a\r\nb\nc\r\n", false},
+		{"mixed mostly LF one CRLF", "a\nb\r\nc\n", false},
+		{"no newline", "abc", false},
+		{"empty", "", false},
+		{"single CRLF line", "a\r\n", true},
+		{"single LF line", "a\n", false},
 	}
 	for _, c := range cases {
-		if got := usesCRLF([]byte(c.in)); got != c.want {
-			t.Errorf("usesCRLF(%q) = %v, want %v", c.in, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			if got := usesCRLF(c.in); got != c.want {
+				t.Errorf("usesCRLF(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
 	}
 }
 
-// A CRLF checkout of an LF-built index carries the same content, so index check
-// must report it in sync — and must still catch real drift.
-func TestIndexInSync_CRLFCheckoutIsInSync(t *testing.T) {
+// TestNormalizeEOL folds CRLF to LF and leaves LF-only content untouched.
+func TestNormalizeEOL(t *testing.T) {
+	if got := normalizeEOL("a\r\nb\r\n"); got != "a\nb\n" {
+		t.Errorf("normalizeEOL CRLF: got %q", got)
+	}
+	if got := normalizeEOL("a\nb\n"); got != "a\nb\n" {
+		t.Errorf("normalizeEOL LF: got %q", got)
+	}
+	// A lone CR not followed by LF is left alone (we only fold CRLF).
+	if got := normalizeEOL("a\rb"); got != "a\rb" {
+		t.Errorf("normalizeEOL lone CR: got %q", got)
+	}
+}
+
+// TestIndexInSync_CRLFIndexIsFresh is seam (b): a CRLF index whose normalized
+// content matches the render reports IN SYNC. Issue #185: `index check` compares
+// raw bytes to the LF render, so a line-ending-only difference counted as drift
+// and Windows teams could not use it as a gate.
+func TestIndexInSync_CRLFIndexIsFresh(t *testing.T) {
 	dir := t.TempDir()
 	_ = Scaffold(dir)
 	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
-	_ = buildAndReload(t, dir)
-	toCRLF(t, filepath.Join(dir, "index.md"))
-	toCRLF(t, filepath.Join(dir, "wine", "index.md"))
 
+	// Build the canonical LF tree, then convert to CRLF (the Windows checkout).
 	b, _ := Load(dir)
-	if ok, diff := IndexInSync(b); !ok {
-		t.Errorf("CRLF checkout of a current index must be in sync; got: %s", diff)
+	if err := WriteIndex(b); err != nil {
+		t.Fatal(err)
 	}
-	writeNode(t, dir, "wine/acidity.md", "Reference", "Acidity")
-	b, _ = Load(dir)
-	if ok, _ := IndexInSync(b); ok {
-		t.Error("a CRLF index must still be reported stale after adding a node")
+	toCRLF(t, dir)
+
+	b2, _ := Load(dir)
+	if ok, diff := IndexInSync(b2); !ok {
+		t.Errorf("a CRLF index matching the render must be IN SYNC (content-only compare); diff:\n%s", diff)
 	}
 }
 
-// index build keeps a CRLF index CRLF, writes a brand-new index LF, and
-// normalises a mixed-ending index to LF.
-func TestWriteIndex_PreservesExistingLineEndings(t *testing.T) {
+// TestIndexInSync_CRLFGenuineDriftStillCaught is the NEGATIVE control for seam
+// (b): normalizing line endings must not mask REAL content drift. A CRLF index
+// that is genuinely stale (a node added after the build) must still report out
+// of sync.
+func TestIndexInSync_CRLFGenuineDriftStillCaught(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
+
+	b, _ := Load(dir)
+	if err := WriteIndex(b); err != nil {
+		t.Fatal(err)
+	}
+	toCRLF(t, dir)
+
+	// Real content change AFTER the index was written: the CRLF index is now
+	// genuinely stale, not merely a different line ending.
+	writeNode(t, dir, "wine/acidity.md", "Reference", "Acidity")
+
+	b2, _ := Load(dir)
+	if ok, _ := IndexInSync(b2); ok {
+		t.Error("a CRLF index with genuinely stale content must still be OUT OF SYNC")
+	}
+}
+
+// TestWriteIndex_PreservesCRLF is seam (c), positive control: `index build` on
+// an up-to-date CRLF checkout leaves every index.md BYTE-IDENTICAL (still CRLF),
+// so git with autocrlf=false (or CRLF committed) sees no churn.
+func TestWriteIndex_PreservesCRLF(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
+
+	b, _ := Load(dir)
+	if err := WriteIndex(b); err != nil {
+		t.Fatal(err)
+	}
+	toCRLF(t, dir)
+
+	rootP := filepath.Join(dir, "index.md")
+	wineP := filepath.Join(dir, "wine", "index.md")
+	beforeRoot := readFileStr(t, rootP)
+	beforeWine := readFileStr(t, wineP)
+	if !strings.Contains(beforeRoot, "\r\n") {
+		t.Fatal("fixture precondition: root index should be CRLF after toCRLF")
+	}
+
+	// Rebuild from the CRLF checkout: content is unchanged, so the files must
+	// stay byte-identical and CRLF.
+	b2, _ := Load(dir)
+	if err := WriteIndex(b2); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFileStr(t, rootP); got != beforeRoot {
+		t.Errorf("root index.md must be byte-identical after rebuild on a CRLF checkout\nbefore: %q\nafter:  %q", beforeRoot, got)
+	}
+	if got := readFileStr(t, wineP); got != beforeWine {
+		t.Errorf("wine/index.md must be byte-identical after rebuild on a CRLF checkout\nbefore: %q\nafter:  %q", beforeWine, got)
+	}
+}
+
+// TestWriteIndex_PreservesLF is seam (c), the LF arm: an up-to-date LF index
+// stays byte-identical and LF after a rebuild (no CRLF leaks in).
+func TestWriteIndex_PreservesLF(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
+
+	b, _ := Load(dir)
+	if err := WriteIndex(b); err != nil {
+		t.Fatal(err)
+	}
+	rootP := filepath.Join(dir, "index.md")
+	before := readFileStr(t, rootP)
+	if strings.Contains(before, "\r\n") {
+		t.Fatal("fixture precondition: a freshly built index should be LF")
+	}
+
+	b2, _ := Load(dir)
+	if err := WriteIndex(b2); err != nil {
+		t.Fatal(err)
+	}
+	after := readFileStr(t, rootP)
+	if after != before {
+		t.Errorf("LF index.md must be byte-identical after rebuild\nbefore: %q\nafter:  %q", before, after)
+	}
+	if strings.Contains(after, "\r\n") {
+		t.Errorf("an LF index must not gain CRLF endings on rebuild; got %q", after)
+	}
+}
+
+// TestWriteIndex_NewIndexIsLF: a directory that gains its first index.md on a
+// build writes LF (new files stay LF; only an EXISTING CRLF file is preserved).
+func TestWriteIndex_NewIndexIsLF(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
+
+	b, _ := Load(dir)
+	if err := WriteIndex(b); err != nil {
+		t.Fatal(err)
+	}
+	wineP := filepath.Join(dir, "wine", "index.md")
+	got := readFileStr(t, wineP)
+	if got == "" {
+		t.Fatal("expected a nested wine/index.md to be written")
+	}
+	if strings.Contains(got, "\r\n") {
+		t.Errorf("a newly written index.md must be LF; got %q", got)
+	}
+}
+
+// TestWriteIndex_CuratorSuffixIdempotentOnCRLF is seam (a), the data-damage bug:
+// a curator subdirectory description in a CRLF index must round-trip through
+// `index build` with the tool-owned shape suffix appearing EXACTLY ONCE. Before
+// the fix, the `$`-anchored suffix regex fails on a trailing \r, the stale
+// suffix is captured into the preserved description, and build appends a fresh
+// one: `... - Audit trail rules. (1 concept · reference) (1 concept · reference)`.
+func TestWriteIndex_CuratorSuffixIdempotentOnCRLF(t *testing.T) {
+	dir := t.TempDir()
+	_ = Scaffold(dir)
+	writeNode(t, dir, "audit/rule.md", "reference", "Rule")
+
+	// Build the canonical index, then give the audit subdirectory entry a
+	// curator description (the §8 curator-owned text before the shape suffix).
+	b, _ := Load(dir)
+	if err := WriteIndex(b); err != nil {
+		t.Fatal(err)
+	}
+	rootP := filepath.Join(dir, "index.md")
+	rendered := readFileStr(t, rootP)
+
+	// Insert a curator description into the audit bullet: turn
+	//   * [Audit](audit/index.md) (N concept · ...)
+	// into
+	//   * [Audit](audit/index.md) - Audit trail rules. (N concept · ...)
+	const linkMarker = "](audit/index.md)"
+	i := strings.Index(rendered, linkMarker)
+	if i < 0 {
+		t.Fatalf("expected an audit subdirectory bullet in the root index; got:\n%s", rendered)
+	}
+	insertAt := i + len(linkMarker)
+	curated := rendered[:insertAt] + " - Audit trail rules." + rendered[insertAt:]
+	if err := os.WriteFile(rootP, []byte(curated), 0o644); err != nil { //nolint:gosec // G306: test fixture
+		t.Fatal(err)
+	}
+
+	// A build on the LF curated index is idempotent and the suffix appears once.
+	bLF, _ := Load(dir)
+	if err := WriteIndex(bLF); err != nil {
+		t.Fatal(err)
+	}
+	lfResult := readFileStr(t, rootP)
+	if n := strings.Count(lfResult, "(1 concept"); n != 1 {
+		t.Fatalf("LF precondition: shape suffix should appear once, got %d:\n%s", n, lfResult)
+	}
+	if !strings.Contains(lfResult, "- Audit trail rules.") {
+		t.Fatalf("LF precondition: curator description should be preserved:\n%s", lfResult)
+	}
+
+	// Now convert to CRLF (the Windows checkout) and rebuild. The suffix must
+	// STILL appear exactly once and the curator description survive verbatim.
+	toCRLF(t, dir)
+	bCRLF, _ := Load(dir)
+	if err := WriteIndex(bCRLF); err != nil {
+		t.Fatal(err)
+	}
+	crlfResult := readFileStr(t, rootP)
+	if n := strings.Count(crlfResult, "(1 concept"); n != 1 {
+		t.Errorf("shape suffix must appear EXACTLY ONCE after a CRLF rebuild, got %d:\n%q", n, crlfResult)
+	}
+	if !strings.Contains(crlfResult, "- Audit trail rules.") {
+		t.Errorf("curator description must survive a CRLF rebuild:\n%q", crlfResult)
+	}
+	if !strings.Contains(crlfResult, "\r\n") {
+		t.Errorf("an up-to-date CRLF index must stay CRLF after rebuild:\n%q", crlfResult)
+	}
+}
+
+// TestWriteIndex_UnchangedIndexIsNotRewritten: index build leaves an index whose
+// content is already current untouched, whatever its line endings: same bytes,
+// same mtime. A CRLF checkout whose index went mixed (an editor or agent wrote
+// LF lines into it) is otherwise rewritten LF on every build, and git, which
+// recorded the CRLF size, reports it modified with an empty diff. The control:
+// an index whose content did change is still rewritten.
+func TestWriteIndex_UnchangedIndexIsNotRewritten(t *testing.T) {
 	dir := t.TempDir()
 	_ = Scaffold(dir)
 	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
 	writeNode(t, dir, "beer/hops.md", "Reference", "Hops")
-	_ = buildAndReload(t, dir)
-
-	root := filepath.Join(dir, "index.md")
-	wine := filepath.Join(dir, "wine", "index.md")
-	beer := filepath.Join(dir, "beer", "index.md")
-	toCRLF(t, root)
-	toCRLF(t, wine)
-	// beer/index.md: mixed — one CRLF line, the rest LF.
-	if err := os.WriteFile(beer, []byte(strings.Replace(readFile(t, beer), "\n", "\r\n", 1)), 0o644); err != nil {
+	writeNode(t, dir, "cider/apple.md", "Reference", "Apple")
+	b, _ := Load(dir)
+	if err := WriteIndex(b); err != nil {
 		t.Fatal(err)
 	}
-	writeNode(t, dir, "wine/acidity.md", "Reference", "Acidity") // forces a real wine/ change
-	writeNode(t, dir, "cider/apple.md", "Reference", "Apple")    // a brand-new index
 
-	b := buildAndReload(t, dir)
-	if ok, diff := IndexInSync(b); !ok {
+	crlf := filepath.Join(dir, "wine", "index.md")
+	mixed := filepath.Join(dir, "beer", "index.md")
+	lf := filepath.Join(dir, "cider", "index.md")
+	set := func(p, s string) {
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil { //nolint:gosec // G306: test fixture
+			t.Fatal(err)
+		}
+	}
+	set(crlf, strings.ReplaceAll(readFileStr(t, crlf), "\n", "\r\n"))
+	set(mixed, strings.Replace(readFileStr(t, mixed), "\n", "\r\n", 1))
+	old := time.Now().Add(-time.Hour)
+	before := map[string]string{}
+	for _, p := range []string{crlf, mixed, lf} {
+		before[p] = readFileStr(t, p)
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeNode(t, dir, "perry/pear.md", "Reference", "Pear") // changes the root index only
+
+	b2, _ := Load(dir)
+	if err := WriteIndex(b2); err != nil {
+		t.Fatal(err)
+	}
+	b3, _ := Load(dir)
+	if ok, diff := IndexInSync(b3); !ok {
 		t.Fatalf("index must be in sync right after build; got: %s", diff)
 	}
-	for _, p := range []string{root, wine} {
-		if got := readFile(t, p); !usesCRLF([]byte(got)) {
-			t.Errorf("%s: CRLF index must stay CRLF after build; got %q", p, got)
+	for p, want := range before {
+		if got := readFileStr(t, p); got != want {
+			t.Errorf("%s: unchanged index must keep its bytes;\nwas %q\nnow %q", p, want, got)
+		}
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !fi.ModTime().Equal(old) {
+			t.Errorf("%s: unchanged index must not be rewritten (mtime moved)", p)
 		}
 	}
-	if got := readFile(t, wine); !strings.Contains(got, "acidity.md") {
-		t.Errorf("wine/index.md must list the new node; got %q", got)
-	}
-	for _, p := range []string{beer, filepath.Join(dir, "cider", "index.md")} {
-		if got := readFile(t, p); strings.Contains(got, "\r") {
-			t.Errorf("%s: new or mixed-ending index must be written LF; got %q", p, got)
-		}
-	}
-}
-
-// A curator-authored subdirectory description in a CRLF index survives a
-// rebuild intact: the trailing CR must not defeat the shape-suffix strip, which
-// would capture the old suffix into the description and double it.
-func TestWriteIndex_CRLFKeepsSubdirDescriptionIdempotent(t *testing.T) {
-	dir := t.TempDir()
-	_ = Scaffold(dir)
-	writeNode(t, dir, "wine/tannin.md", "Reference", "Tannin")
-	_ = buildAndReload(t, dir)
-
-	root := filepath.Join(dir, "index.md")
-	withDesc := strings.Replace(readFile(t, root), "](wine/)", "](wine/) - Grapes and more.", 1)
-	if err := os.WriteFile(root, []byte(withDesc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	toCRLF(t, root)
-
-	b, _ := Load(dir)
-	if ok, diff := IndexInSync(b); !ok {
-		t.Fatalf("CRLF index with a curator description must be in sync; got: %s", diff)
-	}
-	b = buildAndReload(t, dir)
-	got := readFile(t, root)
-	if strings.Count(got, "(1 concept") != 1 {
-		t.Errorf("shape suffix must appear exactly once after rebuilding a CRLF index; got %q", got)
-	}
-	if !strings.Contains(got, " - Grapes and more. (1 concept") {
-		t.Errorf("curator description must be preserved; got %q", got)
-	}
-	if ok, diff := IndexInSync(b); !ok {
-		t.Errorf("index must be in sync after rebuild; got: %s", diff)
+	if got := readFileStr(t, filepath.Join(dir, "index.md")); !strings.Contains(got, "perry/index.md") {
+		t.Errorf("a changed root index must still be rewritten; got %q", got)
 	}
 }

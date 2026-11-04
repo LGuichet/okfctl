@@ -111,7 +111,7 @@ func TestShape_IsTheIndexSuffixData(t *testing.T) {
 		t.Errorf("wine suffix\n got: %q\nwant: %q", got, want)
 	}
 	root := RenderDirIndex(b, "")
-	if !strings.Contains(root, "* [Wine](wine/) (2 concepts · Reference · shared tags: structure) · 4 in subtree\n") {
+	if !strings.Contains(root, "* [Wine](wine/index.md) (2 concepts · Reference · shared tags: structure) · 4 in subtree\n") {
 		t.Errorf("root index must carry wine's shape; got:\n%s", root)
 	}
 }

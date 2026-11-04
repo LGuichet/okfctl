@@ -411,17 +411,32 @@ func bodyLineCount(body string) int {
 
 // citationEntryRe / citationOrderedRe / citationLegendRe mirror the reference
 // corpus.py citation markers: bracketed keys ([1], [S1], [VERIFIED], bullet/bold
-// variants), ordered-list entries (1., 2.), minus status-key legend lines.
+// variants), ordered-list entries (1., 2.), minus status-key legend lines. The
+// bracket class is `[^\]\n]+` — a non-empty, single-line `[...]` token — so a
+// label-style marker whose brackets carry spaces, em-dashes and punctuation
+// (e.g. `- **[VERIFIED — cloned + RUN]** …`, widely used in the corpus) is
+// counted, not only bare alphanumeric keys like `[1]`/`[P]`.
+//
+// citationLinkRe rejects a line whose leading `[...]` token is an ordinary
+// markdown LINK — inline `[text](url)` or reference `[text][ref]` — rather than a
+// citation marker. A `# Citations` section routinely carries line-start
+// cross-reference links to sibling nodes; those are navigation, not sources, and
+// counting them would inflate the coverage signal (the mirror-image of the
+// bare-alphanumeric bug that only counted `[1]`). Go's regexp (RE2) has no
+// lookahead, so the link case is detected by a separate anchored pattern and the
+// line is skipped, exactly as a legend line is.
 var (
-	citationEntryRe   = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\[[A-Za-z0-9]+\]`)
+	citationEntryRe   = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\[[^\]\n]+\]`)
 	citationOrderedRe = regexp.MustCompile(`^\s*(?:[-*]\s*)?\d+\.\s+\S`)
-	citationLegendRe  = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\[[A-Za-z0-9]+\](?:\*\*)?\s*=`)
+	citationLegendRe  = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\[[^\]\n]+\](?:\*\*)?\s*=`)
+	citationLinkRe    = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\[[^\]\n]+\](?:\*\*)?[([]`)
 	citationsHeadRe   = regexp.MustCompile(`(?im)^#+\s*Citations\s*$`)
 )
 
 // citationCount counts distinct entry lines under a "# Citations" heading. A
-// status-key legend line ([key] = ...) is not an entry. Counting is per line so
-// a line matching multiple styles counts once.
+// status-key legend line ([key] = ...) and a line-start markdown link
+// ([text](url) / [text][ref]) are not entries. Counting is per line so a line
+// matching multiple styles counts once.
 func citationCount(body string) int {
 	loc := citationsHeadRe.FindStringIndex(body)
 	if loc == nil {
@@ -430,7 +445,7 @@ func citationCount(body string) int {
 	section := body[loc[1]:]
 	count := 0
 	for _, line := range strings.Split(section, "\n") {
-		if citationLegendRe.MatchString(line) {
+		if citationLegendRe.MatchString(line) || citationLinkRe.MatchString(line) {
 			continue
 		}
 		if citationEntryRe.MatchString(line) || citationOrderedRe.MatchString(line) {
@@ -589,12 +604,14 @@ func analyzeConnectivity(b *Bundle) ConnectivityReport {
 }
 
 func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
-	// Adopt lint's tag fold (tagKeys) so analyze and lint agree on when two
-	// spellings are one tag. Group by canonical key; within a key, keep the
-	// DISTINCT node set (a node tagged both `wine` and `Wine` counts once) and the
-	// lower-cased variants, so the reported tag is a real spelling rather than the
-	// fold key, and a case-only cluster keeps the lower-cased label it always had.
-	tagKey := bundleTagKeys(b)
+	// Adopt lint's shared, bundle-scoped tag fold (newTagFolder: case- and
+	// separator-insensitive plus a vocabulary-aware plural merge) so analyze and
+	// lint agree on when two spellings are one tag. Group by canonical key;
+	// within a key, keep the DISTINCT node set (a node tagged both `wine` and
+	// `Wine` counts once) and the lower-cased variants so the reported label is a
+	// real spelling and matches main's output for a case-only cluster (wine, not
+	// Wine — uppercase would otherwise sort first and change text + --json).
+	fold := newTagFolder(b)
 	type cluster struct {
 		nodes    map[string]bool
 		variants map[string]bool
@@ -602,7 +619,7 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 	byKey := map[string]*cluster{}
 	for _, p := range sortedNodePaths(b) {
 		for _, tag := range nodeTags(b.Nodes[p]) {
-			key := tagKey[strings.TrimSpace(tag)]
+			key := fold(tag)
 			if key == "" {
 				continue
 			}
@@ -632,7 +649,8 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 		}
 		sort.Strings(members)
 		// Report the lexicographically-first lower-cased variant as the cluster
-		// tag: a real spelling from the corpus, deterministic across runs.
+		// tag: a real spelling from the corpus, deterministic across runs, and
+		// matching main's lower-cased label for a case-only cluster.
 		variants := make([]string, 0, len(c.variants))
 		for v := range c.variants {
 			variants = append(variants, v)
@@ -640,11 +658,6 @@ func analyzeClusters(b *Bundle, opts AnalyzeOptions) []ClusterFinding {
 		sort.Strings(variants)
 		out = append(out, ClusterFinding{Tag: variants[0], Nodes: members})
 	}
-	// Order by the reported label, not the fold key: the key drops separators
-	// (e-reporting -> ereporting), and sorting on it would reorder clusters
-	// relative to a case-only fold even when no spelling was merged. Labels are
-	// unique across clusters, since each lower-cased variant has exactly one key.
-	sort.Slice(out, func(i, j int) bool { return out[i].Tag < out[j].Tag })
 	return out
 }
 

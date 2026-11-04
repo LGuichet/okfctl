@@ -39,7 +39,7 @@ func TestRenderDirIndex_SubdirEntryCarriesShape(t *testing.T) {
 	// The design/ subdirectory bullet must carry count + types + tags inline.
 	var line string
 	for _, l := range strings.Split(got, "\n") {
-		if strings.Contains(l, "](design/)") {
+		if strings.Contains(l, "](design/index.md)") {
 			line = l
 			break
 		}
@@ -50,7 +50,7 @@ func TestRenderDirIndex_SubdirEntryCarriesShape(t *testing.T) {
 	if !strings.Contains(line, "(2 concepts · Concept, Map · shared tags: ux)") {
 		t.Errorf("subdir bullet missing shape suffix; got line: %q", line)
 	}
-	if !strings.HasPrefix(line, "* [Design](design/) (") {
+	if !strings.HasPrefix(line, "* [Design](design/index.md) (") {
 		t.Errorf("shape suffix must trail the §8 link form on the same bullet; got: %q", line)
 	}
 }
@@ -86,7 +86,7 @@ func TestRenderDirIndexWithOptions_NoShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	off := RenderDirIndexWithOptions(b, "", IndexShapeOptions{Enabled: false})
-	if !strings.Contains(off, "* [Design](design/)\n") {
+	if !strings.Contains(off, "* [Design](design/index.md)\n") {
 		t.Errorf("--no-shape must render the bare §8 bullet; got:\n%s", off)
 	}
 	if strings.Contains(off, "concepts") || strings.Contains(off, "shared tags") {
@@ -176,7 +176,7 @@ func TestRenderDirIndex_ShapeOnV01Bundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	// (1) shape suffix present on the design/ bullet.
-	if !strings.Contains(string(root), "* [Design](design/) (2 concepts · Concept, Map · shared tags: ux)") {
+	if !strings.Contains(string(root), "* [Design](design/index.md) (2 concepts · Concept, Map · shared tags: ux)") {
 		t.Errorf("shape suffix must render on a v0.1 bundle; got:\n%s", root)
 	}
 	// (2) §12 marker preserved at 0.1.

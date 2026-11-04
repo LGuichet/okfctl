@@ -26,7 +26,18 @@ tagged release, goreleaser generates the release notes from the commit log
   reference that cannot be loaded is a hard error naming the path (plain
   `validate` without `--templates` never consults the key). (#182)
 
+### Changed
+
+- `index build` now links a subdirectory entry to the child's index file
+  (`* [Wine](wine/index.md)`) instead of the bare directory (`wine/`), so a
+  reader that can only open files can follow it. An index written by an older
+  build reads as stale under `index check` once; the next `index build`
+  rewrites its links and keeps hand-written subdirectory descriptions.
+
 ### Fixed
+
+- `node touch` and every other `modified` refresh no longer turn an empty null
+  frontmatter key (`? `) into an empty-string key the node never had.
 
 - `validate` now enforces OKF v0.2 §9 on every reserved `log.md` at any depth:
   each `## ` date heading must be a valid ISO-8601 `YYYY-MM-DD` (rejecting
@@ -48,12 +59,10 @@ tagged release, goreleaser generates the release notes from the commit log
 
 ### Build
 
-- The Go toolchain was bumped from 1.26.6 to 1.26.9 to pick up patched
-  standard-library fixes for seven disclosed vulnerabilities (GO-2026-6603,
-  -6607, -6608, -6611, -6612, -6613, -6617), clearing `govulncheck` in CI.
-- The Go toolchain was bumped from 1.26.9 to 1.26.10 for GO-2026-6809
-  (`crypto/x509` distrusts compromised intermediate certificates), which
-  `govulncheck` reports as reachable from the atomic writer's `crypto/rand` use.
+- The Go toolchain was bumped from 1.26.6 to 1.26.10 to pick up patched
+  standard-library fixes for disclosed vulnerabilities (GO-2026-6603, -6607,
+  -6608, -6611, -6612, -6613, -6617, and the crypto/x509 certificate-verification
+  fix GO-2026-6809), clearing `govulncheck` in CI.
 
 ## [0.4.0] - 2026-08-19
 

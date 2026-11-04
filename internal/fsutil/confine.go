@@ -69,12 +69,7 @@ func ResolveInRoot(root, rel string) (string, error) {
 	if filepath.VolumeName(native) != "" {
 		return "", fmt.Errorf("%w: %s", ErrEscapesRoot, rel)
 	}
-	// Trim leading separators: "/" everywhere, plus `\` on Windows.
-	cutset := "/"
-	if filepath.Separator != '/' {
-		cutset += string(filepath.Separator)
-	}
-	native = strings.TrimLeft(native, cutset)
+	native = strings.TrimLeftFunc(native, func(r rune) bool { return r == '/' || r == filepath.Separator })
 	clean := filepath.Clean(native)
 	if clean == "." || native == "" {
 		return "", fmt.Errorf("%w: %q names the bundle root", ErrInvalidPath, rel)

@@ -408,7 +408,7 @@ lint surfaces judgment-worthy curation findings, not spec-floor violations (use 
 
 A broken-link finding reports an internal .md link that resolves to no node when a node with the same basename exists elsewhere — a moved or mistyped path (a defect), distinct from a genuinely unwritten concept (a coverage gap, which analyze reports advisorily and lint stays quiet on).
 
-tag-hygiene reports two or more `tags` spellings that fold to one canonical form: case and surrounding space are ignored, as are separators (run-book, run_book, run book, ci/cd, and node.js match runbook, cicd, and nodejs), and a plural folds onto its singular only when that singular is itself a tag in the bundle, using KStem's plural rules (short tags such as aws, ops, and js are never stemmed). The fold is a heuristic, so review a finding before normalizing. Like type-hygiene, it never rejects a value: it only reports spellings that fold together, so a curator can pick one.
+tag-hygiene reports two or more `tags` spellings that fold to one canonical form. The fold is a heuristic: case, trimmed, separator-insensitive (so run-book, run_book and runbook are one value), plus a vocabulary-aware plural merge (a plural folds onto its singular only when that singular is itself a tag in the bundle). Like type-hygiene, it never rejects a value: it only reports spellings that fold together, so a curator can pick one. Because the fold is heuristic, review a finding before normalizing — it groups spellings that look like one tag, not a proof that they are.
 
 --semantic adds similarity-driven checks (similar-but-unlinked pairs, nodes with no semantic neighbors) by reading the index built by 'okfctl-search index build'. Core only reads that index, so no embedding model is needed to lint.
 
@@ -917,7 +917,10 @@ search queries the bundle from the CLI without a model or index.
 
 Lexical mode (default): okfctl search "query" [dir] matches concept nodes by
 title, tag, type, or body substring (case-insensitive). Restrict the fields
-with --field title|tag|type|body.
+with --field title|tag|type|body. Matches are ranked by BM25F relevance,
+weighting a hit in the title over tags, type, then body (ties broken by
+path); --sort path lists them in plain path order instead. --json adds
+each match's score.
 
 Graph-structural mode: okfctl search --neighbors <node-path> [dir] returns the
 nodes within --depth hops of a node in the link graph (edges are undirected).
@@ -950,6 +953,7 @@ Flags:
       --json               emit results as JSON
       --neighbors string   graph mode: node path to traverse from
       --no-ignore          walk EVERY directory, including vendored/derived ones (.venv, node_modules, dist, ...) that are skipped by default
+      --sort string        lexical result order: score (BM25F relevance, ties by path) or path (default "score")
 ```
 
 

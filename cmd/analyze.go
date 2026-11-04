@@ -165,6 +165,11 @@ func writeAnalyzeHuman(w io.Writer, rep okf.AnalyzeReport) {
 			fmt.Fprintf(w, "  - %s (age: %s, markers: %s)\n", t.Path, ageStr(t.AgeDays), strings.Join(t.Markers, ", "))
 		}
 	})
+	section("Freshness — past stale_after (§5.5, recheck)", len(fr.Expired), func() {
+		for _, e := range fr.Expired {
+			fmt.Fprintf(w, "  - %s (stale_after: %s)\n", e.Path, e.StaleAfter)
+		}
+	})
 
 	// Connectivity.
 	co := rep.Connectivity

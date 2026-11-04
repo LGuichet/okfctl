@@ -13,6 +13,13 @@ tagged release, goreleaser generates the release notes from the commit log
 
 ### Added
 
+- `analyze` now reports nodes whose §5.5 `stale_after` instant has passed, in a
+  new `freshness.expired` list (`path`, `stale_after`) and a "past stale_after"
+  section of the human report. okfctl already parsed the key but never surfaced
+  it; the age-based `stale` signal can't see a producer-declared expiry on a node
+  edited yesterday. It is a report entry, never a `validate` or `lint` failure,
+  and an absent or unparseable `stale_after` stays silent (§11).
+
 - A knowledge bundle can now reference a separate type-template bundle instead of
   vendoring one. Declare it with a `templates: <path>` key in the bundle's `.okf`
   sidecar (resolved relative to the bundle root), or pass `--templates-from <dir>`

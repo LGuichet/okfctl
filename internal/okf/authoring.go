@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/cwest/okfctl/internal/fsutil"
 	"gopkg.in/yaml.v3"
@@ -67,10 +68,15 @@ func NewNodeFromTemplate(root, relPath, typ, title string, t Template) (string, 
 
 	fm := &yaml.Node{Kind: yaml.MappingNode}
 	appendKV := func(key, val string) {
-		fm.Content = append(fm.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: key},
-			&yaml.Node{Kind: yaml.ScalarNode, Value: val},
-		)
+		v := &yaml.Node{Kind: yaml.ScalarNode, Value: val}
+		// yaml.v3 writes a multi-line value as a literal block, and a block
+		// whose first line starts with a tab does not parse back. Double quotes
+		// escape every control character, so such a value round-trips; any
+		// other value keeps the plain style.
+		if strings.IndexFunc(val, unicode.IsControl) >= 0 {
+			v.Style = yaml.DoubleQuotedStyle
+		}
+		fm.Content = append(fm.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: key}, v)
 	}
 	appendKV("type", typ)
 	if strings.TrimSpace(title) != "" {
